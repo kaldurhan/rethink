@@ -50,4 +50,4 @@ arch:
     - aarch64
     - amd64
 
-image: 'ghcr.io/anszom/rethink'
+image: 'ghcr.io/alexw23/rethink'
