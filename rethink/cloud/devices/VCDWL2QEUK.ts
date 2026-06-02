@@ -51,6 +51,23 @@ const PHASES_VCDWL: Record<number, string> = {
     0x0310: 'Idle',
     0x0510: 'Idle',
     0x0810: 'Idle',
+    0x0110: 'WashFill',
+    0x0b10: 'WashTumble',
+    0x260b: 'WashDrain',
+    0x0b26: 'WashDrain',
+    0x040e: 'RinseFill',
+    0x060e: 'RinseTumble',
+    0x0e0c: 'RinseDrain',
+    0x0c0e: 'RinseDrain',
+    0x080e: 'SpinActive',
+    0x0a0e: 'SpinActive',
+    0x100e: 'Finished',
+    0x0010: 'Finished',
+}
+
+function decodePhase(phA: number, phB: number): string {
+    if (phA === 0x18 && phB >= 0x12 && phB <= 0x1f) return 'SpinRamp'
+    return PHASES_VCDWL[(phA << 8) | phB] ?? 'unknown'
 }
 
 /**
@@ -93,8 +110,7 @@ export default class Device extends AABBDevice {
         if (subStart < 0) return
         const sub = inner.subarray(subStart, subStart + 21)
 
-        const phaseKey = (sub[1] << 8) | sub[2]
-        const phase = PHASES_VCDWL[phaseKey] ?? 'unknown'
+        const phase = decodePhase(sub[1], sub[2])
         this.publishProperty('cycle_phase', phase)
 
         const sp = sub[3]

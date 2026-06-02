@@ -45,4 +45,54 @@ describe(MODEL_ID, () => {
         assert.equal(p.spin, 400)
         assert.equal(p.temp, '40')
     })
+
+    // Synthesized minimal long packet. Inner is 36 bytes; sub-block at
+    // offset 14 carries the tuple under test. The AABB envelope (aa ff …
+    // 00 bb) is stripped by the base class before processAABB is called.
+    function synthFrame(phA: number, phB: number, sp: number, cs: number, tt_lo: number, tt_hi: number): Buffer {
+        const inner = Buffer.alloc(36)
+        inner[0] = 0x20
+        inner[10] = 0xec // ST = Selected
+        // Sub-block at offset 14:
+        inner[14] = 0x05
+        inner[15] = phA
+        inner[16] = phB
+        inner[17] = sp
+        inner[18] = cs
+        inner[19] = 0x00 // sub[5] = 0x00 (required by locator)
+        inner[27] = tt_lo // sub[13] — remaining_time low byte / temp byte
+        inner[28] = tt_hi // sub[14] — remaining_time high byte
+        inner[33] = cs // sub[19] — CS repeat (required by locator)
+        inner[34] = 0x01 // sub[20] — terminator (required by locator)
+        return Buffer.concat([Buffer.from([0xaa, 0xff]), inner, Buffer.from([0x00, 0xbb])])
+    }
+
+    test('cycle_phase WashTumble + remaining_time decode when not Idle', () => {
+        const { ha, thinq } = makeDevice()
+        // WashTumble = 0x0b10. remaining = 0x05 + (0x00<<8) = 5 minutes.
+        thinq.emit('data', synthFrame(0x0b, 0x10, 0x06, 0x2b, 0x05, 0x00))
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.cycle_phase, 'WashTumble')
+        assert.equal(p.remaining_time, 5)
+        // temp must NOT be published when phase != Idle.
+        assert.equal(p.temp, undefined)
+    })
+
+    test('cycle_phase SpinRamp range (sub[1]=0x18, sub[2] in 0x12..0x1f)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x18, 0x15, 0x06, 0x2b, 0x02, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'SpinRamp')
+    })
+
+    test('cycle_phase Finished maps from 0x100e', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x10, 0x0e, 0x06, 0x2b, 0x00, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Finished')
+    })
+
+    test('cycle_phase unknown for unrecognized tuple', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0xff, 0xff, 0x06, 0x2b, 0x00, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'unknown')
+    })
 })
