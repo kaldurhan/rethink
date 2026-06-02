@@ -6,6 +6,7 @@ import Dev_2RES1VE61NFA2 from './devices/2RES1VE61NFA2'
 import Dev_2REB1GLVB1__2 from './devices/2REB1GLVB1__2'
 import Dev_2RES1VE600FWC from './devices/2RES1VE600FWC'
 import RH90V9_WW from './devices/RH90V9_WW'
+import RHX7009TWS from './devices/RHX7009TWS'
 import Y_V8_Y___W_B32QEUK from './devices/Y_V8_Y___W.B32QEUK'
 import F_V8_Y___W_B_2QEUK from './devices/F_V8_Y___W.B_2QEUK'
 import F_V__F___W_B_1QEUK from './devices/F_V__F___W.B_1QEUK'
@@ -28,6 +29,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     RAC_056905_WW,
     WIN_056905_WW,
     RH90V9_WW,
+    RHX7009TWS,
     ['2REF11EIDA__4']: Dev_2REF11EIDA__4,
     ['2RES1VE61NFA2']: Dev_2RES1VE61NFA2,
     ['2REB1GLVB1__2']: Dev_2REB1GLVB1__2,
