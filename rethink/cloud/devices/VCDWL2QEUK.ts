@@ -2,6 +2,8 @@ import { Device as Thinq2Device } from '../thinq2/device'
 import { type Connection } from '../homeassistant'
 import { type Metadata } from '../thinq'
 import AABBDevice from './aabb_device'
+import HADevice from './base'
+import { allowExtendedType } from '@/util/casting'
 
 // inner[10] — machine state.
 const STATES_VCDWL: Record<number, string> = {
@@ -93,8 +95,83 @@ function findStatusSubBlock(inner: Buffer): number {
 }
 
 export default class Device extends AABBDevice {
-    constructor(HA: Connection, thinq: Thinq2Device, _meta: Metadata) {
+    constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
+        const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown']
+        const phaseOptions = [
+            'Idle',
+            'WashFill',
+            'WashTumble',
+            'WashDrain',
+            'RinseFill',
+            'RinseTumble',
+            'RinseDrain',
+            'SpinRamp',
+            'SpinActive',
+            'Finished',
+            'unknown',
+        ]
+        this.setConfig(
+            allowExtendedType({
+                ...HADevice.config(meta, { name: 'LG F4X7511TWS' }),
+                components: {
+                    machine_state: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-machine_state',
+                        state_topic: '$this/machine_state',
+                        name: 'Machine state',
+                        icon: 'mdi:power',
+                        device_class: 'enum',
+                        options: ['Standby', 'DisplayOn', 'Selected', 'Weighing', 'unknown'],
+                    },
+                    cycle_phase: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-cycle_phase',
+                        state_topic: '$this/cycle_phase',
+                        name: 'Cycle phase',
+                        icon: 'mdi:state-machine',
+                        device_class: 'enum',
+                        options: phaseOptions,
+                    },
+                    course: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-course',
+                        state_topic: '$this/course',
+                        name: 'Program',
+                        icon: 'mdi:tumble-dryer',
+                        device_class: 'enum',
+                        options: courseOptions,
+                    },
+                    temp: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-temp',
+                        state_topic: '$this/temp',
+                        name: 'Temperature',
+                        icon: 'mdi:thermometer',
+                        device_class: 'enum',
+                        options: ['Cold', '20-30', '40', '60', 'unknown'],
+                    },
+                    spin: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-spin',
+                        state_topic: '$this/spin',
+                        name: 'Spin speed',
+                        icon: 'mdi:fan',
+                        unit_of_measurement: 'rpm',
+                        state_class: 'measurement',
+                    },
+                    remaining_time: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-remaining_time',
+                        state_topic: '$this/remaining_time',
+                        name: 'Time remaining',
+                        icon: 'mdi:timer-outline',
+                        unit_of_measurement: 'min',
+                        state_class: 'measurement',
+                    },
+                },
+            }),
+        )
     }
 
     processAABB(inner: Buffer) {

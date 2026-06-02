@@ -95,4 +95,26 @@ describe(MODEL_ID, () => {
         thinq.emit('data', synthFrame(0xff, 0xff, 0x06, 0x2b, 0x00, 0x00))
         assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'unknown')
     })
+
+    test('config exposes expected components on construction', () => {
+        const { ha } = makeDevice()
+        const cfg = ha.devices[DEVICE_ID].config
+        assert.ok(cfg, 'config published')
+        const components = cfg!.components as Record<string, Record<string, unknown>>
+        for (const c of ['machine_state', 'cycle_phase', 'course', 'temp', 'spin', 'remaining_time']) {
+            assert.ok(components[c], `component ${c} present`)
+        }
+        // machine_state enum includes the four known states.
+        const msOptions = components.machine_state.options as string[]
+        assert.ok(msOptions.includes('Standby'))
+        assert.ok(msOptions.includes('Selected'))
+        assert.ok(msOptions.includes('Weighing'))
+        // cycle_phase enum must include SpinRamp (range-based, not in the static map).
+        const cpOptions = components.cycle_phase.options as string[]
+        assert.ok(cpOptions.includes('SpinRamp'))
+        assert.ok(cpOptions.includes('Finished'))
+        // spin uses rpm; remaining_time uses min.
+        assert.equal(components.spin.unit_of_measurement, 'rpm')
+        assert.equal(components.remaining_time.unit_of_measurement, 'min')
+    })
 })
