@@ -204,4 +204,53 @@ describe(MODEL_ID, () => {
             assert.equal(ha.devices[DEVICE_ID].properties.spin, expectedSpin)
         })
     }
+
+    test('frame not matching AA..BB envelope is ignored', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', buf('001122'))
+        assert.equal(ha.devices[DEVICE_ID]?.properties.machine_state, undefined)
+    })
+
+    test('frame with inner[0] != 0x20 is ignored', () => {
+        const { ha, thinq } = makeDevice()
+        // Valid AA..BB envelope; inner first byte is 0x99 (not 0x20).
+        thinq.emit('data', buf('aa09990a0102030400bb'))
+        assert.equal(ha.devices[DEVICE_ID]?.properties.machine_state, undefined)
+    })
+
+    test('publishCache suppresses redundant publishes (idempotency)', () => {
+        const { ha, thinq } = makeDevice()
+        let publishes = 0
+        const original = ha.publishProperty.bind(ha)
+        ha.publishProperty = (id: string, prop: string, value: string | number) => {
+            publishes++
+            return original(id, prop, value)
+        }
+        thinq.emit('data', STANDBY_1)
+        const after1 = publishes
+        thinq.emit('data', STANDBY_1)
+        // The second emit should not republish machine_state (cache hit).
+        assert.equal(publishes, after1, 'no second publish for identical packet')
+    })
+
+    test('setProperty is a no-op (sensors-only v1)', () => {
+        const { thinq, dev } = makeDevice()
+        thinq.resetRecorder()
+        dev.setProperty('power', 'ON')
+        dev.setProperty('start', '')
+        dev.setProperty('pause', '')
+        assert.equal(thinq.outbox.length, 0, 'no packets emitted from HA writes')
+    })
+
+    test('standby packet after display-on does not clobber prior course/spin/temp', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DISPLAY_ON)
+        assert.equal(ha.devices[DEVICE_ID].properties.temp, '40')
+        thinq.emit('data', STANDBY_1)
+        // machine_state updated, but other props retain their last-known value.
+        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Standby')
+        assert.equal(ha.devices[DEVICE_ID].properties.temp, '40')
+        assert.equal(ha.devices[DEVICE_ID].properties.course, 'Blandmaterial')
+        assert.equal(ha.devices[DEVICE_ID].properties.spin, 400)
+    })
 })

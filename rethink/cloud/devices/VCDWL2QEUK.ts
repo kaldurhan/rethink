@@ -203,4 +203,8 @@ export default class Device extends AABBDevice {
             this.publishProperty('remaining_time', remaining)
         }
     }
+
+    setProperty(_prop: string, _mqttValue: string) {
+        // sensors-only v1; ignore HA writes silently.
+    }
 }
