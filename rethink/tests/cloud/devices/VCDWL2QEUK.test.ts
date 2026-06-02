@@ -11,6 +11,9 @@ const META: Metadata = { modelId: MODEL_ID, modelName: MODEL_ID, swVersion: '0.0
 // Raw captures from the 2026-06-02 reverse-engineering session.
 const STANDBY_1 = buf('aaff200a001300007d0001010b000100f8fdbb')
 const STANDBY_2 = buf('aaff200a00130000a90001010b000100c175bb')
+const DISPLAY_ON = buf(
+    'aaff200a0044000081000100eb003200050310062b00000000000000008400840000002b010000000000031a040101755a00000002000418000000000000040000b098bb',
+)
 
 function makeDevice() {
     const ha = new MockHAConnection()
@@ -30,5 +33,16 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', STANDBY_2)
         assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Standby')
+    })
+
+    test('display-on-no-program decodes machine_state, course, spin, temp, cycle_phase', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DISPLAY_ON)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'DisplayOn')
+        assert.equal(p.cycle_phase, 'Idle')
+        assert.equal(p.course, 'Blandmaterial')
+        assert.equal(p.spin, 400)
+        assert.equal(p.temp, '40')
     })
 })
