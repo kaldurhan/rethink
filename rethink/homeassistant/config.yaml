@@ -56,4 +56,4 @@ arch:
     - aarch64
     - amd64
 
-image: 'ghcr.io/alexw23/rethink'
+image: 'ghcr.io/kaldurhan/rethink'
