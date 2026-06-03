@@ -29,7 +29,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     RAC_056905_WW,
     WIN_056905_WW,
     RH90V9_WW,
-    RHX7009TWS,
+    ['SDH_X7_7008']: RHX7009TWS,
     ['2REF11EIDA__4']: Dev_2REF11EIDA__4,
     ['2RES1VE61NFA2']: Dev_2RES1VE61NFA2,
     ['2REB1GLVB1__2']: Dev_2REB1GLVB1__2,
