@@ -28,7 +28,7 @@ const COURSES: Record<number, string> = {
     0x0d: 'Easy Iron',
     0x13: 'Drum Care',
     0x15: 'Allergy Care',
-    0x1b: 'Easy Iron',
+    0x1b: 'Strykfritt',
     0x1c: 'Eco',
     0x26: 'AI Dry',
     0x3a: 'TurboDry',
