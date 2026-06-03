@@ -57,6 +57,7 @@ const PHASES_VCDWL: Record<number, string> = {
     0x0b10: 'WashTumble',
     0x260b: 'WashDrain',
     0x0b26: 'WashDrain',
+    0x0010: 'Rinsing',
     0x040e: 'RinseFill',
     0x060e: 'RinseTumble',
     0x0e0c: 'RinseDrain',
@@ -64,7 +65,6 @@ const PHASES_VCDWL: Record<number, string> = {
     0x080e: 'SpinActive',
     0x0a0e: 'SpinActive',
     0x100e: 'Finished',
-    0x0010: 'Finished',
 }
 
 function decodePhase(phA: number, phB: number): string {
@@ -92,7 +92,12 @@ function decodePhase(phA: number, phB: number): string {
  */
 function findStatusSubBlock(inner: Buffer): number {
     for (let i = inner.length - 21; i >= 14; i--) {
-        if ((inner[i] === 0x05 || inner[i] === 0x03) && inner[i + 5] === 0x00 && inner[i + 19] === inner[i + 4]) {
+        if (
+            (inner[i] === 0x05 || inner[i] === 0x03 || inner[i] === 0x00) &&
+            inner[i + 4] !== 0x00 &&
+            inner[i + 5] === 0x00 &&
+            inner[i + 19] === inner[i + 4]
+        ) {
             return i
         }
     }
@@ -108,6 +113,7 @@ export default class Device extends AABBDevice {
             'WashFill',
             'WashTumble',
             'WashDrain',
+            'Rinsing',
             'RinseFill',
             'RinseTumble',
             'RinseDrain',

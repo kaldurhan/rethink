@@ -112,6 +112,7 @@ describe(MODEL_ID, () => {
         // cycle_phase enum must include SpinRamp (range-based, not in the static map).
         const cpOptions = components.cycle_phase.options as string[]
         assert.ok(cpOptions.includes('SpinRamp'))
+        assert.ok(cpOptions.includes('Rinsing'))
         assert.ok(cpOptions.includes('Finished'))
         // spin uses rpm; remaining_time uses min.
         assert.equal(components.spin.unit_of_measurement, 'rpm')
@@ -122,6 +123,19 @@ describe(MODEL_ID, () => {
     // Uses 0x03-variant sub-block; findStatusSubBlock previously returned -1 for these.
     const TURBOWASH_RUNNING_1MIN = buf(
         'aaff200a00760003c4000100ec006400030310087a000000000000000038003f0080007a0b2600090000031b040101755a2000001001041800000000000004000000030310087a000000000000000037003f009c007a0b2600090000031b040101755a200000100104180000000000000400007fd8bb',
+    )
+
+    // DisplayOn with Turbowash 39 selected: uses 0x00-variant sub-block.
+    // Previously findStatusSubBlock returned -1 → course was never updated from a
+    // prior Blandmaterial session.
+    const TURBOWASH_DISPLAY_ON = buf(
+        'aaff200a004400045d000100eb003200000010087a00000000000000001d003f0100007a0c0b00090000031b040101755a20000010010418000000000000040000bbeebb',
+    )
+
+    // Rinsing phase of Turbowash 39: uses 0x00-variant sub-block, phase 0x0010.
+    // remaining_time counts down from ~29 minutes.
+    const TURBOWASH_RINSING = buf(
+        'aaff200a007600046a000100ec006400000010087a00000000000000001d003f0100007a0c0b00090000031b040101755a2000001001041800000000000004000000000010087a00000000000000001c003f0103007a0c0b00090000031b040101755a20000010010418000000000000040000567abb',
     )
 
     const COTTON_40_1200 = buf(
@@ -137,6 +151,26 @@ describe(MODEL_ID, () => {
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
         assert.equal(p.remaining_time, 55)
+    })
+
+    test('0x00-variant DisplayOn (Turbowash 39 selected) reads correct course', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_DISPLAY_ON)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'DisplayOn')
+        assert.equal(p.course, 'Turbowash 39')
+        assert.equal(p.spin, 800)
+    })
+
+    test('0x00-variant rinsing phase decodes machine_state=Running, phase=Rinsing, remaining_time', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RINSING)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.cycle_phase, 'Rinsing')
+        assert.equal(p.course, 'Turbowash 39')
+        assert.equal(p.spin, 800)
+        assert.equal(p.remaining_time, 28)
     })
 
     test('unknown ST byte (0x4d telemetry burst) is suppressed', () => {
