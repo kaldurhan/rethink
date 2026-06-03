@@ -10,7 +10,8 @@ const STATES_VCDWL: Record<number, string> = {
     0x0b: 'Standby',
     0xeb: 'DisplayOn',
     0xec: 'Running',
-    0x04: 'Weighing',
+    0x04: 'End',
+    0xe2: 'AntiCrease',
 }
 
 // sub[4] — course code. sub[5] is always 0x00 (the LE high byte).
@@ -51,6 +52,7 @@ const SPINS_VCDWL: Record<number, number> = {
 // (sub[1] << 8) | sub[2] — cycle phase. Multiple equivalent encodings
 // per phase per the wiki notes.
 const PHASES_VCDWL: Record<number, string> = {
+    0x0000: 'Finished', // post-cycle Running packets: phA=0x00, phB=0x00
     0x0310: 'Idle',
     0x0510: 'Idle',
     0x0810: 'Idle',
@@ -135,7 +137,7 @@ export default class Device extends AABBDevice {
                         name: 'Machine state',
                         icon: 'mdi:power',
                         device_class: 'enum',
-                        options: ['Standby', 'Running', 'Weighing'],
+                        options: ['Standby', 'Running', 'End', 'AntiCrease'],
                     },
                     cycle_phase: {
                         platform: 'sensor',

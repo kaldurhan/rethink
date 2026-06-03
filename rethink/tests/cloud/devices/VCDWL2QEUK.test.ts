@@ -109,8 +109,10 @@ describe(MODEL_ID, () => {
         const msOptions = components.machine_state.options as string[]
         assert.ok(msOptions.includes('Standby'))
         assert.ok(msOptions.includes('Running'))
-        assert.ok(msOptions.includes('Weighing'))
+        assert.ok(msOptions.includes('End'))
+        assert.ok(msOptions.includes('AntiCrease'))
         assert.ok(!msOptions.includes('DisplayOn'), 'DisplayOn must not appear in options')
+        assert.ok(!msOptions.includes('Weighing'), 'Weighing must not appear — 0x04 is End')
         // cycle_phase enum must include SpinRamp (range-based, not in the static map).
         const cpOptions = components.cycle_phase.options as string[]
         assert.ok(cpOptions.includes('SpinRamp'))
@@ -298,6 +300,48 @@ describe(MODEL_ID, () => {
         thinq.emit('data', STANDBY_1)
         // The second emit should not republish machine_state (cache hit).
         assert.equal(publishes, after1, 'no second publish for identical packet')
+    })
+
+    // End-of-cycle captures (18:07 window, Blandmaterial full run).
+    // 18:07:33 — ST=0x04 (End); no valid sub-block in this packet type.
+    const END_OF_CYCLE = buf(
+        'aaff200a00580007040001010400460303010100040506073900000000ff012d00fd000001171300011e11000101fd787400fd00fd00fdfdfd000000da1d0300000100074302000464004080123cdc49431a001a003a38bb',
+    )
+    // 18:07:39 — ST=0xe2 (AntiCrease); brief post-End drum state.
+    const ANTI_CREASE_END = buf(
+        'aaff200a004400070500010ae2003200050310062b00000000000000006b006b0146002b030100000000031c040101755a2000000000041800000000000004000083febb',
+    )
+    // 18:07:47 — ST=0xec (Running); post-cycle double-sub-block where phA=0x00,
+    // phB=0x00 encodes Finished. findStatusSubBlock picks the last sub-block.
+    const RUNNING_FINISHED = buf(
+        'aaff200a0076000707000100ec006400000000062b000000000000000001005d0145002b0e0c00010000031c040101755a2000001001041800000000000004000000000000062b000000000000000001005d0146002b100e00010000031c040101755a20000010010418000000000000040000d822bb',
+    )
+
+    test('end-of-cycle packet (ST=0x04) → machine_state=End, no sub-block update', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', END_OF_CYCLE)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'End')
+        // No valid sub-block → phase/spin/course/remaining not touched
+        assert.equal(p.cycle_phase, undefined)
+    })
+
+    test('anti-crease packet (ST=0xe2) → machine_state=AntiCrease, phase=Idle', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', ANTI_CREASE_END)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'AntiCrease')
+        assert.equal(p.cycle_phase, 'Idle')
+        assert.equal(p.course, 'Blandmaterial')
+    })
+
+    test('post-cycle Running packet (phA=0x00, phB=0x00) → cycle_phase=Finished', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', RUNNING_FINISHED)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.cycle_phase, 'Finished')
+        assert.equal(p.course, 'Blandmaterial')
     })
 
     test('setProperty is a no-op (sensors-only v1)', () => {
