@@ -22,6 +22,13 @@ const DRYING_TR29 = buf(
     'aaff300a0078008d30000100ec0066000003000009000000001e001e0701000200000409000000000040810500000000000000000000000000006400040078000000000003000009000000001d001e07010002000004090000000000408105000000000000000000000000000064000400780000000ef4bb',
 )
 
+// Captured from real device: first sub-block is 65 bytes (one byte longer than
+// DRYING_TR29), so the footer lands at inner[57] instead of inner[56].
+// This previously caused program/remaining_time/phase to read garbage (off by 1).
+const REAL_RUNNING_TR30 = buf(
+    'aaff300a0078008eb3000100ec0066000003000009000000001e001e0103000200000409000000200000810500000000000000000000000000006400040078000000000003000009000000001e001e0701000200000409000000000040810500000000000000000000000000006400040078000000dad5bb',
+)
+
 const COOLDOWN = buf(
     'aaff300a0064008ded00020103002907100305070101047502090300150009050903030004000000000000000045003c0000000000010133010500255344485f58375f373030380000000000000000000102bf220b8b01070000000000000000007c7ebb',
 )
@@ -145,5 +152,15 @@ describe(MODEL_ID, () => {
         thinq.emit('data', DISPLAY_ON_IDLE)
         thinq.emit('data', DISPLAY_ON_IDLE)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'DisplayOn')
+    })
+
+    test('real device packet with 65-byte first sub-block → program=Quick Dry 30, remaining_time=30, phase=Drying', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', REAL_RUNNING_TR30)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.run_state, 'Running')
+        assert.equal(p.program, 'Quick Dry 30')
+        assert.equal(p.remaining_time, 30)
+        assert.equal(p.phase, 'Drying')
     })
 })

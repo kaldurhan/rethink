@@ -137,16 +137,29 @@ export default class Device extends AABBDevice {
         if (inner.length < 24) return
 
         // ── Determine sub-block offsets ───────────────────────────────────────
-        // 116-byte double-block packets carry the live selection in the second
-        // sub-block starting at inner[64]; all shorter packets use inner[0].
+        // Double-block packets (inner.length >= 116) carry two sub-blocks.
+        // The second sub-block is always 52 bytes, but the first sub-block
+        // length varies (64 or 65 bytes depending on packet state), so we
+        // locate sub2 dynamically by scanning for the first sub-block's
+        // footer signature: 64 00 04 00 78 [00 00 00].
         //
-        // Field absolute offsets:
-        //   single-block: CS=inner[18], TR=inner[23], phase=inner[14,15]
-        //   double-block: CS=inner[69], TR=inner[74], phase=inner[77,78]
-        //   COOLDOWN-type (inner[8]=0x02): phase=inner[13,14] (9-byte header)
-        const hasSub2 = inner.length >= 116
-        const csOffset = hasSub2 ? 69 : 18
-        const trOffset = hasSub2 ? 74 : 23
+        // Field offsets relative to sub2Start:
+        //   CS=+5, TR=+10, phA=+13, phB=+14
+        //
+        // Single-block: CS=inner[18], TR=inner[23], phase=inner[14,15]
+        // COOLDOWN-type (inner[8]=0x02): phase=inner[13,14] (9-byte header)
+        let sub2Start = -1
+        if (inner.length >= 116) {
+            for (let i = 54; i <= 66 && i + 7 < inner.length; i++) {
+                if (inner[i] === 0x64 && inner[i + 2] === 0x04 && inner[i + 4] === 0x78) {
+                    sub2Start = i + 8
+                    break
+                }
+            }
+        }
+        const hasSub2 = sub2Start > 0 && sub2Start + 14 < inner.length
+        const csOffset = hasSub2 ? sub2Start + 5 : 18
+        const trOffset = hasSub2 ? sub2Start + 10 : 23
 
         let phA: number
         let phB: number
@@ -155,8 +168,8 @@ export default class Device extends AABBDevice {
             phA = inner[13]
             phB = inner[14]
         } else if (hasSub2) {
-            phA = inner[77]
-            phB = inner[78]
+            phA = inner[sub2Start + 13]
+            phB = inner[sub2Start + 14]
         } else {
             phA = inner[14]
             phB = inner[15]
