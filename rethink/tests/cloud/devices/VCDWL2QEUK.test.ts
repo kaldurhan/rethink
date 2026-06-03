@@ -52,7 +52,7 @@ describe(MODEL_ID, () => {
     function synthFrame(phA: number, phB: number, sp: number, cs: number, tt_lo: number, tt_hi: number): Buffer {
         const inner = Buffer.alloc(36)
         inner[0] = 0x20
-        inner[10] = 0xec // ST = Selected
+        inner[10] = 0xec // ST = Running
         // Sub-block at offset 14:
         inner[14] = 0x05
         inner[15] = phA
@@ -107,7 +107,7 @@ describe(MODEL_ID, () => {
         // machine_state enum includes the four known states.
         const msOptions = components.machine_state.options as string[]
         assert.ok(msOptions.includes('Standby'))
-        assert.ok(msOptions.includes('Selected'))
+        assert.ok(msOptions.includes('Running'))
         assert.ok(msOptions.includes('Weighing'))
         // cycle_phase enum must include SpinRamp (range-based, not in the static map).
         const cpOptions = components.cycle_phase.options as string[]
@@ -118,15 +118,44 @@ describe(MODEL_ID, () => {
         assert.equal(components.remaining_time.unit_of_measurement, 'min')
     })
 
+    // Real captured packet from active Turbowash 39 cycle (1 minute in).
+    // Uses 0x03-variant sub-block; findStatusSubBlock previously returned -1 for these.
+    const TURBOWASH_RUNNING_1MIN = buf(
+        'aaff200a00760003c4000100ec006400030310087a000000000000000038003f0080007a0b2600090000031b040101755a2000001001041800000000000004000000030310087a000000000000000037003f009c007a0b2600090000031b040101755a200000100104180000000000000400007fd8bb',
+    )
+
     const COTTON_40_1200 = buf(
         'aaff200a00760001eb000100ec00640000000000040000000000000000a800a800000004000200090000011a040101755a0010000000041800000000000004000000050310062b00000000000000008400840000002b010000000000031a040101755a000000020004180000000000000400004f0dbb',
     )
+
+    test('0x03-variant sub-block (active Turbowash cycle) decodes correctly', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.cycle_phase, 'Idle')
+        assert.equal(p.course, 'Turbowash 39')
+        assert.equal(p.spin, 800)
+        assert.equal(p.remaining_time, 55)
+    })
+
+    test('unknown ST byte (0x4d telemetry burst) is suppressed', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DISPLAY_ON)
+        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'DisplayOn')
+        // 0x4d = telemetry burst, not a mapped state
+        const telemetry = buf(
+            'aaff200a00300003a50001014d001e0302000d022b027a024f0255024b025e022e027202130216021d02880204fb5bbb',
+        )
+        thinq.emit('data', telemetry)
+        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'DisplayOn')
+    })
 
     test('boot-up packet: locator picks status sub-block at offset 64, not device-info at 14', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COTTON_40_1200)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'Selected')
+        assert.equal(p.machine_state, 'Running')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
         // Broadcast-lag: appliance had not committed SP=0x0c (1200rpm) yet;

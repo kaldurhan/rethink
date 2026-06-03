@@ -9,7 +9,7 @@ import { allowExtendedType } from '@/util/casting'
 const STATES_VCDWL: Record<number, string> = {
     0x0b: 'Standby',
     0xeb: 'DisplayOn',
-    0xec: 'Selected',
+    0xec: 'Running',
     0x04: 'Weighing',
 }
 
@@ -75,19 +75,24 @@ function decodePhase(phA: number, phB: number): string {
 /**
  * Find the status sub-block in a long status packet.
  *
- * Each sub-block has the shape:
- *   05 PH_A PH_B SP CS 00 00 00 00 00 00 00 00 00 TT_LO 00 TT_DUP 00 00 00 CS 01
- *   0  1    2   3  4  5  6  7  8  9 10 11 12 13 14    15 16     17 18 19 20
+ * Two sub-block variants exist:
+ *   0x05-variant (DisplayOn / spin phases):
+ *     05 PH_A PH_B SP CS 00 ... CS 01
+ *   0x03-variant (Running — weight-detect, wash, rinse, spin):
+ *     03 PH_A PH_B SP CS 00 ... CS 0b
  *
- * Long packets contain either two status sub-blocks (steady-state) or one
- * device-info sub-block followed by one status sub-block (boot-up). The
- * STATUS sub-block is always the last one. We scan from the end backwards
- * for the unique signature: 0x05 at the start, repeated CS byte at +19,
- * 0x01 at +20.
+ * Common layout (positions relative to sub-block start):
+ *   [1]  PH_A   [2]  PH_B   [3] spin   [4] course
+ *   [5]  0x00 (anchor)      [13] remaining_time_lo  [14] remaining_time_hi
+ *   [15] initial_time_lo    [19] course (repeated — anchor)
+ *
+ * Long packets contain either two sub-blocks (steady-state) or one
+ * device-info block followed by one status sub-block (boot-up). The STATUS
+ * sub-block is always last; we scan backwards.
  */
 function findStatusSubBlock(inner: Buffer): number {
     for (let i = inner.length - 21; i >= 14; i--) {
-        if (inner[i] === 0x05 && inner[i + 5] === 0x00 && inner[i + 20] === 0x01 && inner[i + 19] === inner[i + 4]) {
+        if ((inner[i] === 0x05 || inner[i] === 0x03) && inner[i + 5] === 0x00 && inner[i + 19] === inner[i + 4]) {
             return i
         }
     }
@@ -122,7 +127,7 @@ export default class Device extends AABBDevice {
                         name: 'Machine state',
                         icon: 'mdi:power',
                         device_class: 'enum',
-                        options: ['Standby', 'DisplayOn', 'Selected', 'Weighing', 'unknown'],
+                        options: ['Standby', 'DisplayOn', 'Running', 'Weighing'],
                     },
                     cycle_phase: {
                         platform: 'sensor',
@@ -178,7 +183,13 @@ export default class Device extends AABBDevice {
         if (inner.length < 11 || inner[0] !== 0x20) return
 
         const st = inner[10]
-        this.publishProperty('machine_state', STATES_VCDWL[st] ?? 'unknown')
+        const stateLabel = STATES_VCDWL[st]
+
+        // Unknown ST bytes (e.g. 0x4d telemetry bursts) — suppress rather than
+        // publishing a garbage label and disrupting the HA sensor.
+        if (stateLabel === undefined) return
+
+        this.publishProperty('machine_state', stateLabel)
 
         // Short standby packet — no sub-block, leave other props untouched.
         if (inner.length < 32) return
@@ -196,7 +207,10 @@ export default class Device extends AABBDevice {
         const cs = sub[4]
         this.publishProperty('course', COURSES_VCDWL[cs] ?? `unknown_0x${cs.toString(16).padStart(2, '0')}`)
 
-        if (phase === 'Idle') {
+        // 0x03-variant sub-blocks (active Running cycles) always carry remaining_time
+        // in sub[13]; temperature is only valid in 0x05-variant Idle phases.
+        const subMarker = inner[subStart]
+        if (subMarker === 0x05 && phase === 'Idle') {
             this.publishProperty('temp', TEMPERATURES_VCDWL[sub[13]] ?? 'unknown')
         } else {
             const remaining = sub[13] | (sub[14] << 8)
