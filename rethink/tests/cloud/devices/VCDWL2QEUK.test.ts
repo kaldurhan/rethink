@@ -114,7 +114,8 @@ describe(MODEL_ID, () => {
         // cycle_phase enum must include SpinRamp (range-based, not in the static map).
         const cpOptions = components.cycle_phase.options as string[]
         assert.ok(cpOptions.includes('SpinRamp'))
-        assert.ok(cpOptions.includes('Rinsing'))
+        assert.ok(cpOptions.includes('Tumble'))
+        assert.ok(cpOptions.includes('Drain'))
         assert.ok(cpOptions.includes('Finished'))
         // spin uses rpm; remaining_time uses min.
         assert.equal(components.spin.unit_of_measurement, 'rpm')
@@ -134,9 +135,9 @@ describe(MODEL_ID, () => {
         'aaff200a004400045d000100eb003200000010087a00000000000000001d003f0100007a0c0b00090000031b040101755a20000010010418000000000000040000bbeebb',
     )
 
-    // Rinsing phase of Turbowash 39: uses 0x00-variant sub-block, phase 0x0010.
+    // Tumble phase of Turbowash 39: uses 0x00-variant sub-block, phase 0x0010.
     // remaining_time counts down from ~29 minutes.
-    const TURBOWASH_RINSING = buf(
+    const TURBOWASH_TUMBLE = buf(
         'aaff200a007600046a000100ec006400000010087a00000000000000001d003f0100007a0c0b00090000031b040101755a2000001001041800000000000004000000000010087a00000000000000001c003f0103007a0c0b00090000031b040101755a20000010010418000000000000040000567abb',
     )
 
@@ -165,12 +166,12 @@ describe(MODEL_ID, () => {
         assert.equal(p.spin, 800)
     })
 
-    test('0x00-variant rinsing phase decodes machine_state=Running, phase=Rinsing, remaining_time', () => {
+    test('0x00-variant active phase (0x0010) decodes machine_state=Running, phase=Tumble, remaining_time', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', TURBOWASH_RINSING)
+        thinq.emit('data', TURBOWASH_TUMBLE)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.machine_state, 'Running')
-        assert.equal(p.cycle_phase, 'Rinsing')
+        assert.equal(p.cycle_phase, 'Tumble')
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
         assert.equal(p.remaining_time, 28)
@@ -318,5 +319,52 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.temp, '40')
         assert.equal(ha.devices[DEVICE_ID].properties.course, 'Blandmaterial')
         assert.equal(ha.devices[DEVICE_ID].properties.spin, 400)
+    })
+
+    // Captured 16:56:19 — Blandmaterial with 84 min remaining, pre-wash idle phase.
+    // Uses 50-byte 0x05-variant sub-blocks (terminator=0x0b, not 0x01 like temp-scroll).
+    // Backwards locator finds the last sub-block (remaining=83 at sub[13]).
+    const BLANDMATERIAL_PRESTART = buf(
+        'aaff200a00760005cd000100ec006400050310062b000000000000000054005d00a2002b0b2600010000031c040101755a2000001001041800000000000004000000050310062b000000000000000053005d00c2002b0b2600010000031c040101755a20000010010418000000000000040000825ebb',
+    )
+
+    test('50-byte 0x05-variant (pre-wash Running) → machine_state=Running, phase=Idle, remaining_time=83', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', BLANDMATERIAL_PRESTART)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.cycle_phase, 'Idle')
+        assert.equal(p.course, 'Blandmaterial')
+        assert.equal(p.spin, 400)
+        assert.equal(p.remaining_time, 83)
+        // temp must NOT be published when sub[20]=0x0b (active-running sub-block)
+        assert.equal(p.temp, undefined)
+    })
+
+    // Synthetic frame for the Drain phase (0x0006). Uses a 0x03-variant sub-block
+    // with phA=0x00, phB=0x06, observed in Blandmaterial end-of-cycle packets.
+    function synthFrame03(phA: number, phB: number, sp: number, cs: number, tt_lo: number, tt_hi: number): Buffer {
+        const inner = Buffer.alloc(36)
+        inner[0] = 0x20
+        inner[10] = 0xec
+        inner[14] = 0x03
+        inner[15] = phA
+        inner[16] = phB
+        inner[17] = sp
+        inner[18] = cs
+        inner[19] = 0x00
+        inner[27] = tt_lo
+        inner[28] = tt_hi
+        inner[33] = cs // cs-repeat at +19
+        inner[34] = 0x0b
+        return Buffer.concat([Buffer.from([0xaa, 0xff]), inner, Buffer.from([0x00, 0xbb])])
+    }
+
+    test('phase 0x0006 (Drain) decodes correctly', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame03(0x00, 0x06, 0x01, 0x2b, 0x05, 0x00))
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.cycle_phase, 'Drain')
+        assert.equal(p.remaining_time, 5)
     })
 })

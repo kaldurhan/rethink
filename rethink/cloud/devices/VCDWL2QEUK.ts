@@ -45,6 +45,7 @@ const SPINS_VCDWL: Record<number, number> = {
     0x09: 1000,
     0x0c: 1200,
     0x01: 1400,
+    0x27: 0, // seen in Blandmaterial final spin; actual RPM unconfirmed
 }
 
 // (sub[1] << 8) | sub[2] — cycle phase. Multiple equivalent encodings
@@ -57,7 +58,8 @@ const PHASES_VCDWL: Record<number, string> = {
     0x0b10: 'WashTumble',
     0x260b: 'WashDrain',
     0x0b26: 'WashDrain',
-    0x0010: 'Rinsing',
+    0x0010: 'Tumble', // active tumbling — appears in both wash and rinse phases
+    0x0006: 'Drain', // end-of-cycle drain observed in Blandmaterial captures
     0x040e: 'RinseFill',
     0x060e: 'RinseTumble',
     0x0e0c: 'RinseDrain',
@@ -92,14 +94,13 @@ function decodePhase(phA: number, phB: number): string {
  */
 function findStatusSubBlock(inner: Buffer): number {
     for (let i = inner.length - 21; i >= 14; i--) {
-        if (
-            (inner[i] === 0x05 || inner[i] === 0x03 || inner[i] === 0x00) &&
-            inner[i + 4] !== 0x00 &&
-            inner[i + 5] === 0x00 &&
-            inner[i + 19] === inner[i + 4]
-        ) {
-            return i
-        }
+        const marker = inner[i]
+        if (marker !== 0x05 && marker !== 0x03 && marker !== 0x00) continue
+        const cs = inner[i + 4]
+        if (cs === 0x00) continue
+        if (inner[i + 5] !== 0x00) continue
+
+        if (inner[i + 19] === cs) return i
     }
     return -1
 }
@@ -113,7 +114,8 @@ export default class Device extends AABBDevice {
             'WashFill',
             'WashTumble',
             'WashDrain',
-            'Rinsing',
+            'Tumble',
+            'Drain',
             'RinseFill',
             'RinseTumble',
             'RinseDrain',
@@ -215,10 +217,11 @@ export default class Device extends AABBDevice {
         const cs = sub[4]
         this.publishProperty('course', COURSES_VCDWL[cs] ?? `unknown_0x${cs.toString(16).padStart(2, '0')}`)
 
-        // 0x03-variant sub-blocks (active Running cycles) always carry remaining_time
-        // in sub[13]; temperature is only valid in 0x05-variant Idle phases.
+        // sub[20] is the terminator byte: 0x01 for temp-scroll sub-blocks (21 bytes),
+        // 0x0b for active-running sub-blocks (50 bytes). Both have cs-repeat at sub[19].
+        // Only publish temp when it's a temp-scroll sub-block in Idle phase.
         const subMarker = inner[subStart]
-        if (subMarker === 0x05 && phase === 'Idle') {
+        if (subMarker === 0x05 && sub[20] === 0x01 && phase === 'Idle') {
             this.publishProperty('temp', TEMPERATURES_VCDWL[sub[13]] ?? 'unknown')
         } else {
             const remaining = sub[13] | (sub[14] << 8)
