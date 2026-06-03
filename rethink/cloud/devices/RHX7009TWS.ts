@@ -133,14 +133,9 @@ export default class Device extends AABBDevice {
         // than publishing a garbage label and disrupting the HA sensor.
         if (stateLabel === undefined) return
 
-        this.publishProperty('run_state', stateLabel)
-
-        if (st === 0x04 || st === 0xe2) {
-            this.publishProperty('remaining_time', 0)
-        }
-
-        // Short/standby packet — leave other properties untouched
-        if (inner.length < 24) return
+        // Info-class packets (inner[8]=0x02) have a 9-byte header; CS/TR/phase
+        // offsets are wrong for that format — only ST is reliable.
+        const isInfoClass = inner[8] === 0x02
 
         // ── Determine sub-block offsets ───────────────────────────────────────
         // Double-block packets (inner.length >= 116) carry two sub-blocks.
@@ -153,9 +148,8 @@ export default class Device extends AABBDevice {
         //   CS=+5, TR=+10, phA=+13, phB=+14
         //
         // Single-block: CS=inner[18], TR=inner[23], phase=inner[14,15]
-        // COOLDOWN-type (inner[8]=0x02): phase=inner[13,14] (9-byte header)
         let sub2Start = -1
-        if (inner.length >= 116) {
+        if (!isInfoClass && inner.length >= 116) {
             for (let i = 54; i <= 66 && i + 7 < inner.length; i++) {
                 if (inner[i] === 0x64 && inner[i + 2] === 0x04 && inner[i + 4] === 0x78) {
                     sub2Start = i + 8
@@ -164,25 +158,38 @@ export default class Device extends AABBDevice {
             }
         }
         const hasSub2 = sub2Start > 0 && sub2Start + 14 < inner.length
-        const csOffset = hasSub2 ? sub2Start + 5 : 18
         const trOffset = hasSub2 ? sub2Start + 10 : 23
+        const tr = inner.length >= 24 && trOffset < inner.length ? inner[trOffset] : 0
+
+        // Running with TR=0 is the post-cycle anti-wrinkle tumble — the drying
+        // program finished but the drum keeps spinning. Keep End displayed until
+        // Standby/DisplayOn arrives.
+        if (st === 0xec && tr === 0) return
+
+        this.publishProperty('run_state', stateLabel)
+
+        if (st === 0x04 || st === 0xe2) {
+            this.publishProperty('remaining_time', 0)
+        }
+
+        // Short/standby packet — leave other properties untouched
+        if (inner.length < 24) return
+
+        // Info-class packets: only ST is valid, skip CS/TR/phase.
+        if (isInfoClass) return
+
+        const csOffset = hasSub2 ? sub2Start + 5 : 18
+        const cs = inner[csOffset]
 
         let phA: number
         let phB: number
-        if (inner[8] === 0x02) {
-            // Info-class packet has a 9-byte header instead of 10
-            phA = inner[13]
-            phB = inner[14]
-        } else if (hasSub2) {
+        if (hasSub2) {
             phA = inner[sub2Start + 13]
             phB = inner[sub2Start + 14]
         } else {
             phA = inner[14]
             phB = inner[15]
         }
-
-        const cs = inner[csOffset]
-        const tr = trOffset < inner.length ? inner[trOffset] : 0
 
         this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
         this.publishProperty('phase', decodePhase(phA, phB))

@@ -33,6 +33,12 @@ const COOLDOWN = buf(
     'aaff300a0064008ded00020103002907100305070101047502090300150009050903030004000000000000000045003c0000000000010133010500255344485f58375f373030380000000000000000000102bf220b8b01070000000000000000007c7ebb',
 )
 
+// Running packet with TR=0 in sub2 — the post-cycle anti-wrinkle tumble.
+// Captured at 12:38:35 immediately after the End packet.
+const POST_CYCLE_TUMBLE = buf(
+    'aaff300a0078009171000100ec00660000030000090000000001001e0400000701180409000000200000810500000000000000000000000000006400040078000000000000000009000000000000000004000001180409000000200000810500000000000000000000000000006400040078000000ed9bbb',
+)
+
 const ANTI_CREASE = buf(
     'aaff300a0045008e4000010ae20033000003000009000000001e001e0701000200e3040900000000004081050000000000000000000000000000640004007800000046f9bb',
 )
@@ -116,11 +122,12 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Drying')
     })
 
-    test('cooldown → phase=Cooldown', () => {
+    test('cooldown → run_state=Cooldown, info-class packet does not update program/phase', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COOLDOWN)
-        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Cooldown')
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Cooldown')
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, undefined)
+        assert.equal(ha.devices[DEVICE_ID].properties.program, undefined)
     })
 
     test('anti-crease → run_state=AntiCrease', () => {
@@ -145,6 +152,14 @@ describe(MODEL_ID, () => {
         bad[2] = 0x99
         thinq.emit('data', bad)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
+    })
+
+    test('post-cycle tumble (Running TR=0) is suppressed — End state preserved', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', FINISHED)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
+        thinq.emit('data', POST_CYCLE_TUMBLE)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
     })
 
     test('unknown ST byte is suppressed — last known state preserved', () => {
