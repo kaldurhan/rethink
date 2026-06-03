@@ -127,7 +127,13 @@ export default class Device extends AABBDevice {
         if (inner.length < 11) return
 
         const st = inner[10]
-        this.publishProperty('run_state', STATES[st] ?? `unknown (${st.toString(16)})`)
+        const stateLabel = STATES[st]
+
+        // Unknown ST bytes are transient telemetry or init packets — skip rather
+        // than publishing a garbage label and disrupting the HA sensor.
+        if (stateLabel === undefined) return
+
+        this.publishProperty('run_state', stateLabel)
 
         if (st === 0x04 || st === 0xe2) {
             this.publishProperty('remaining_time', 0)

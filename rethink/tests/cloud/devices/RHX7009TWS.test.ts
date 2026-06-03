@@ -147,6 +147,16 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
     })
 
+    test('unknown ST byte is suppressed — last known state preserved', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DISPLAY_ON_IDLE)
+        // Mutate ST byte (inner[10] = buf[12]) to an unmapped value
+        const unknown = Buffer.from(DISPLAY_ON_IDLE)
+        unknown[12] = 0x4d
+        thinq.emit('data', unknown)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'DisplayOn')
+    })
+
     test('publishProperty deduplication — same packet twice only publishes once', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON_IDLE)
