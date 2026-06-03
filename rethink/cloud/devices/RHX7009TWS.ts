@@ -77,6 +77,8 @@ export default class Device extends AABBDevice {
                         state_topic: '$this/run_state',
                         name: 'Run state',
                         icon: 'mdi:state-machine',
+                        device_class: 'enum',
+                        options: ['Standby', 'Running', 'Cooldown', 'AntiCrease', 'End'],
                     },
                     program: {
                         platform: 'sensor',

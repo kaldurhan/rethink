@@ -62,12 +62,21 @@ describe(MODEL_ID, () => {
 
     test('config exposes expected sensor components', () => {
         const { ha } = makeDevice()
-        const cfg = ha.devices[DEVICE_ID]?.config?.components
+        const cfg = ha.devices[DEVICE_ID]?.config?.components as Record<string, Record<string, unknown>>
         assert.ok(cfg, 'config.components should be set on construction')
         assert.ok('run_state' in cfg, 'run_state component missing')
         assert.ok('program' in cfg, 'program component missing')
         assert.ok('phase' in cfg, 'phase component missing')
         assert.ok('remaining_time' in cfg, 'remaining_time component missing')
+        // run_state must be an enum so HA shows the available states dropdown.
+        assert.equal(cfg.run_state.device_class, 'enum')
+        const opts = cfg.run_state.options as string[]
+        assert.ok(opts.includes('Standby'))
+        assert.ok(opts.includes('Running'))
+        assert.ok(opts.includes('Cooldown'))
+        assert.ok(opts.includes('AntiCrease'))
+        assert.ok(opts.includes('End'))
+        assert.ok(!opts.includes('DisplayOn'), 'DisplayOn must not appear in options')
     })
 
     test('standby packet → run_state=Standby', () => {
