@@ -113,18 +113,22 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COOLDOWN)
         assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Cooldown')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Cooldown')
     })
 
     test('anti-crease → run_state=AntiCrease', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', ANTI_CREASE)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'AntiCrease')
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 0)
     })
 
     test('finished → run_state=End', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', FINISHED)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 0)
+        assert.equal(ha.devices[DEVICE_ID].properties.program, 'Auto Dry')
     })
 
     test('unknown frame type byte is ignored (no crash)', () => {

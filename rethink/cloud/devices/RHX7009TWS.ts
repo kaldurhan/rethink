@@ -12,6 +12,7 @@ const STATES: Record<number, string> = {
     0x0b: 'Standby',
     0xeb: 'DisplayOn',
     0xec: 'Running',
+    0x03: 'Cooldown',
     0xe2: 'AntiCrease',
     0x04: 'End',
 }
@@ -30,6 +31,7 @@ const COURSES: Record<number, string> = {
     0x15: 'Allergy Care',
     0x1b: 'Strykfritt',
     0x1c: 'Eco',
+    0x21: 'Auto Dry', // observed only in End packet; exact name unconfirmed
     0x26: 'AI Dry',
     0x3a: 'TurboDry',
 }
@@ -126,6 +128,10 @@ export default class Device extends AABBDevice {
 
         const st = inner[10]
         this.publishProperty('run_state', STATES[st] ?? `unknown (${st.toString(16)})`)
+
+        if (st === 0x04 || st === 0xe2) {
+            this.publishProperty('remaining_time', 0)
+        }
 
         // Short/standby packet — leave other properties untouched
         if (inner.length < 24) return
