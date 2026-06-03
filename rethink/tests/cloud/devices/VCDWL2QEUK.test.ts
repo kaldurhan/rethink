@@ -35,12 +35,12 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
     })
 
-    test('display-on-no-program: run_state suppressed, sub-block decoded', () => {
+    test('display-on-no-program: run_state falls back to Standby (clears stale retained message)', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON)
         const p = ha.devices[DEVICE_ID].properties
-        // DisplayOn is filtered — run_state not published
-        assert.equal(p.run_state, undefined)
+        // Fresh device: cache is empty, so DisplayOn publishes Standby to flush any stale retained value.
+        assert.equal(p.run_state, 'Standby')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
         assert.equal(p.spin, 400)
@@ -158,14 +158,23 @@ describe(MODEL_ID, () => {
         assert.equal(p.remaining_time, 55)
     })
 
-    test('0x00-variant DisplayOn (Turbowash 39 selected) reads correct course, run_state suppressed', () => {
+    test('0x00-variant DisplayOn (Turbowash 39 selected) reads correct course; run_state falls back to Standby on fresh device', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_DISPLAY_ON)
         const p = ha.devices[DEVICE_ID].properties
-        // DisplayOn is filtered — run_state stays at last meaningful state
-        assert.equal(p.run_state, undefined)
+        // Fresh device: cache is empty, so DisplayOn publishes Standby to flush any stale retained value.
+        assert.equal(p.run_state, 'Standby')
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
+    })
+
+    test('0x00-variant DisplayOn during active run → run_state stays Running (cache-check guards mid-cycle)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        thinq.emit('data', TURBOWASH_DISPLAY_ON)
+        // Cache has 'Running' → DisplayOn must not overwrite it.
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('0x00-variant active phase (0x0010) decodes run_state=Running, phase=Tumble, remaining_time', () => {

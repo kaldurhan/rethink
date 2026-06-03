@@ -76,13 +76,22 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
     })
 
-    test('display-on-idle → run_state suppressed, program=Mixed Fabrics', () => {
+    test('display-on-idle → run_state falls back to Standby (clears stale retained message), program=Mixed Fabrics', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON_IDLE)
         const p = ha.devices[DEVICE_ID].properties
-        // DisplayOn is filtered — run_state stays at last meaningful state (undefined on fresh device)
-        assert.equal(p.run_state, undefined)
+        // Fresh device: cache is empty, so DisplayOn publishes Standby to flush any stale retained value.
+        assert.equal(p.run_state, 'Standby')
         assert.equal(p.program, 'Mixed Fabrics')
+    })
+
+    test('display-on during running → run_state stays Running (cache-check guards mid-cycle)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        thinq.emit('data', DISPLAY_ON_IDLE)
+        // Cache has 'Running' → DisplayOn must not overwrite it.
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('display-on-idle → phase=Idle', () => {

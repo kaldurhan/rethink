@@ -200,8 +200,16 @@ export default class Device extends AABBDevice {
         if (stateLabel === undefined) return
 
         // DisplayOn is transient user-browsing; keep the last meaningful state visible.
+        // Exception: if run_state is unknown (server just restarted) or stuck at
+        // 'DisplayOn' (stale MQTT retained message from before the suppress fix),
+        // publish Standby so the broker's retained value is corrected.
         // Sub-block processing continues so course/spin/temp stay current.
-        if (st !== 0xeb) this.publishProperty('run_state', stateLabel)
+        if (st !== 0xeb) {
+            this.publishProperty('run_state', stateLabel)
+        } else {
+            const cached = this.getProperty('run_state')
+            if (!cached || cached === 'DisplayOn') this.publishProperty('run_state', 'Standby')
+        }
 
         // Short standby packet — no sub-block, leave other props untouched.
         if (inner.length < 32) return
