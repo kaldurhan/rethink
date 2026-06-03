@@ -23,24 +23,24 @@ function makeDevice() {
 }
 
 describe(MODEL_ID, () => {
-    test('standby short packet sets machine_state=Standby', () => {
+    test('standby short packet sets run_state=Standby', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', STANDBY_1)
-        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Standby')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
     })
 
     test('second standby short packet (different seq) decodes the same', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', STANDBY_2)
-        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Standby')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
     })
 
-    test('display-on-no-program: machine_state suppressed, sub-block decoded', () => {
+    test('display-on-no-program: run_state suppressed, sub-block decoded', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON)
         const p = ha.devices[DEVICE_ID].properties
-        // DisplayOn is filtered — machine_state not published
-        assert.equal(p.machine_state, undefined)
+        // DisplayOn is filtered — run_state not published
+        assert.equal(p.run_state, undefined)
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
         assert.equal(p.spin, 400)
@@ -102,11 +102,11 @@ describe(MODEL_ID, () => {
         const cfg = ha.devices[DEVICE_ID].config
         assert.ok(cfg, 'config published')
         const components = cfg!.components as Record<string, Record<string, unknown>>
-        for (const c of ['machine_state', 'cycle_phase', 'course', 'temp', 'spin', 'remaining_time']) {
+        for (const c of ['run_state', 'cycle_phase', 'course', 'temp', 'spin', 'remaining_time']) {
             assert.ok(components[c], `component ${c} present`)
         }
-        // machine_state enum includes the published states (DisplayOn is filtered).
-        const msOptions = components.machine_state.options as string[]
+        // run_state enum includes the published states (DisplayOn is filtered).
+        const msOptions = components.run_state.options as string[]
         assert.ok(msOptions.includes('Standby'))
         assert.ok(msOptions.includes('Running'))
         assert.ok(msOptions.includes('End'))
@@ -151,7 +151,7 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_RUNNING_1MIN)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.run_state, 'Running')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
@@ -162,17 +162,17 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_DISPLAY_ON)
         const p = ha.devices[DEVICE_ID].properties
-        // DisplayOn is filtered — machine_state stays at last meaningful state
-        assert.equal(p.machine_state, undefined)
+        // DisplayOn is filtered — run_state stays at last meaningful state
+        assert.equal(p.run_state, undefined)
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
     })
 
-    test('0x00-variant active phase (0x0010) decodes machine_state=Running, phase=Tumble, remaining_time', () => {
+    test('0x00-variant active phase (0x0010) decodes run_state=Running, phase=Tumble, remaining_time', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_TUMBLE)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.run_state, 'Running')
         assert.equal(p.cycle_phase, 'Tumble')
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
@@ -182,20 +182,20 @@ describe(MODEL_ID, () => {
     test('unknown ST byte (0x4d telemetry burst) is suppressed', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_RUNNING_1MIN)
-        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Running')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
         // 0x4d = telemetry burst, not a mapped state
         const telemetry = buf(
             'aaff200a00300003a50001014d001e0302000d022b027a024f0255024b025e022e027202130216021d02880204fb5bbb',
         )
         thinq.emit('data', telemetry)
-        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Running')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('boot-up packet: locator picks status sub-block at offset 64, not device-info at 14', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COTTON_40_1200)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.run_state, 'Running')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
         // Broadcast-lag: appliance had not committed SP=0x0c (1200rpm) yet;
@@ -277,14 +277,14 @@ describe(MODEL_ID, () => {
     test('frame not matching AA..BB envelope is ignored', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', buf('001122'))
-        assert.equal(ha.devices[DEVICE_ID]?.properties.machine_state, undefined)
+        assert.equal(ha.devices[DEVICE_ID]?.properties.run_state, undefined)
     })
 
     test('frame with inner[0] != 0x20 is ignored', () => {
         const { ha, thinq } = makeDevice()
         // Valid AA..BB envelope; inner first byte is 0x99 (not 0x20).
         thinq.emit('data', buf('aa09990a0102030400bb'))
-        assert.equal(ha.devices[DEVICE_ID]?.properties.machine_state, undefined)
+        assert.equal(ha.devices[DEVICE_ID]?.properties.run_state, undefined)
     })
 
     test('publishCache suppresses redundant publishes (idempotency)', () => {
@@ -298,7 +298,7 @@ describe(MODEL_ID, () => {
         thinq.emit('data', STANDBY_1)
         const after1 = publishes
         thinq.emit('data', STANDBY_1)
-        // The second emit should not republish machine_state (cache hit).
+        // The second emit should not republish run_state (cache hit).
         assert.equal(publishes, after1, 'no second publish for identical packet')
     })
 
@@ -317,20 +317,20 @@ describe(MODEL_ID, () => {
         'aaff200a0076000707000100ec006400000000062b000000000000000001005d0145002b0e0c00010000031c040101755a2000001001041800000000000004000000000000062b000000000000000001005d0146002b100e00010000031c040101755a20000010010418000000000000040000d822bb',
     )
 
-    test('end-of-cycle packet (ST=0x04) → machine_state=End, no sub-block update', () => {
+    test('end-of-cycle packet (ST=0x04) → run_state=End, no sub-block update', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', END_OF_CYCLE)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'End')
+        assert.equal(p.run_state, 'End')
         // No valid sub-block → phase/spin/course/remaining not touched
         assert.equal(p.cycle_phase, undefined)
     })
 
-    test('anti-crease packet (ST=0xe2) → machine_state=AntiCrease, phase=Idle', () => {
+    test('anti-crease packet (ST=0xe2) → run_state=AntiCrease, phase=Idle', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', ANTI_CREASE_END)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'AntiCrease')
+        assert.equal(p.run_state, 'AntiCrease')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
     })
@@ -339,7 +339,7 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', RUNNING_FINISHED)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.run_state, 'Running')
         assert.equal(p.cycle_phase, 'Finished')
         assert.equal(p.course, 'Blandmaterial')
     })
@@ -358,8 +358,8 @@ describe(MODEL_ID, () => {
         thinq.emit('data', DISPLAY_ON)
         assert.equal(ha.devices[DEVICE_ID].properties.temp, '40')
         thinq.emit('data', STANDBY_1)
-        // machine_state updated, but other props retain their last-known value.
-        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Standby')
+        // run_state updated, but other props retain their last-known value.
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
         assert.equal(ha.devices[DEVICE_ID].properties.temp, '40')
         assert.equal(ha.devices[DEVICE_ID].properties.course, 'Blandmaterial')
         assert.equal(ha.devices[DEVICE_ID].properties.spin, 400)
@@ -372,11 +372,11 @@ describe(MODEL_ID, () => {
         'aaff200a00760005cd000100ec006400050310062b000000000000000054005d00a2002b0b2600010000031c040101755a2000001001041800000000000004000000050310062b000000000000000053005d00c2002b0b2600010000031c040101755a20000010010418000000000000040000825ebb',
     )
 
-    test('50-byte 0x05-variant (pre-wash Running) → machine_state=Running, phase=Idle, remaining_time=83', () => {
+    test('50-byte 0x05-variant (pre-wash Running) → run_state=Running, phase=Idle, remaining_time=83', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', BLANDMATERIAL_PRESTART)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'Running')
+        assert.equal(p.run_state, 'Running')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
         assert.equal(p.spin, 400)

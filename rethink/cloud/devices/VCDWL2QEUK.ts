@@ -5,7 +5,7 @@ import AABBDevice from './aabb_device'
 import HADevice from './base'
 import { allowExtendedType } from '@/util/casting'
 
-// inner[10] — machine state.
+// inner[10] — run state.
 const STATES_VCDWL: Record<number, string> = {
     0x0b: 'Standby',
     0xeb: 'DisplayOn',
@@ -130,11 +130,11 @@ export default class Device extends AABBDevice {
             allowExtendedType({
                 ...HADevice.config(meta, { name: 'LG F4X7511TWS' }),
                 components: {
-                    machine_state: {
+                    run_state: {
                         platform: 'sensor',
-                        unique_id: '$deviceid-machine_state',
-                        state_topic: '$this/machine_state',
-                        name: 'Machine state',
+                        unique_id: '$deviceid-run_state',
+                        state_topic: '$this/run_state',
+                        name: 'Run state',
                         icon: 'mdi:power',
                         device_class: 'enum',
                         options: ['Standby', 'Running', 'End', 'AntiCrease'],
@@ -201,7 +201,7 @@ export default class Device extends AABBDevice {
 
         // DisplayOn is transient user-browsing; keep the last meaningful state visible.
         // Sub-block processing continues so course/spin/temp stay current.
-        if (st !== 0xeb) this.publishProperty('machine_state', stateLabel)
+        if (st !== 0xeb) this.publishProperty('run_state', stateLabel)
 
         // Short standby packet — no sub-block, leave other props untouched.
         if (inner.length < 32) return
