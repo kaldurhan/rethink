@@ -76,11 +76,12 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
     })
 
-    test('display-on-idle → run_state=DisplayOn, program=Mixed Fabrics', () => {
+    test('display-on-idle → run_state suppressed, program=Mixed Fabrics', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON_IDLE)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.run_state, 'DisplayOn')
+        // DisplayOn is filtered — run_state stays at last meaningful state (undefined on fresh device)
+        assert.equal(p.run_state, undefined)
         assert.equal(p.program, 'Mixed Fabrics')
     })
 
@@ -164,19 +165,19 @@ describe(MODEL_ID, () => {
 
     test('unknown ST byte is suppressed — last known state preserved', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', DISPLAY_ON_IDLE)
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
         // Mutate ST byte (inner[10] = buf[12]) to an unmapped value
-        const unknown = Buffer.from(DISPLAY_ON_IDLE)
+        const unknown = Buffer.from(QUICK_DRY_30_SELECTED)
         unknown[12] = 0x4d
         thinq.emit('data', unknown)
-        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'DisplayOn')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('publishProperty deduplication — same packet twice only publishes once', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', DISPLAY_ON_IDLE)
-        thinq.emit('data', DISPLAY_ON_IDLE)
-        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'DisplayOn')
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('real device packet with 65-byte first sub-block → program=Quick Dry 30, remaining_time=30, phase=Drying', () => {

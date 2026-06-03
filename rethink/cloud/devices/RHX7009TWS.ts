@@ -166,7 +166,9 @@ export default class Device extends AABBDevice {
         // Standby/DisplayOn arrives.
         if (st === 0xec && tr === 0) return
 
-        this.publishProperty('run_state', stateLabel)
+        // DisplayOn is transient user-browsing; keep the last meaningful state visible.
+        // Sub-block processing continues so program/phase/dryness stay current.
+        if (st !== 0xeb) this.publishProperty('run_state', stateLabel)
 
         if (st === 0x04 || st === 0xe2) {
             this.publishProperty('remaining_time', 0)

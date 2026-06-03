@@ -133,7 +133,7 @@ export default class Device extends AABBDevice {
                         name: 'Machine state',
                         icon: 'mdi:power',
                         device_class: 'enum',
-                        options: ['Standby', 'DisplayOn', 'Running', 'Weighing'],
+                        options: ['Standby', 'Running', 'Weighing'],
                     },
                     cycle_phase: {
                         platform: 'sensor',
@@ -195,7 +195,9 @@ export default class Device extends AABBDevice {
         // publishing a garbage label and disrupting the HA sensor.
         if (stateLabel === undefined) return
 
-        this.publishProperty('machine_state', stateLabel)
+        // DisplayOn is transient user-browsing; keep the last meaningful state visible.
+        // Sub-block processing continues so course/spin/temp stay current.
+        if (st !== 0xeb) this.publishProperty('machine_state', stateLabel)
 
         // Short standby packet — no sub-block, leave other props untouched.
         if (inner.length < 32) return

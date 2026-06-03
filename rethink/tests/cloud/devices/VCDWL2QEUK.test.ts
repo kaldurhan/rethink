@@ -35,11 +35,12 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Standby')
     })
 
-    test('display-on-no-program decodes machine_state, course, spin, temp, cycle_phase', () => {
+    test('display-on-no-program: machine_state suppressed, sub-block decoded', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'DisplayOn')
+        // DisplayOn is filtered — machine_state not published
+        assert.equal(p.machine_state, undefined)
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
         assert.equal(p.spin, 400)
@@ -104,11 +105,12 @@ describe(MODEL_ID, () => {
         for (const c of ['machine_state', 'cycle_phase', 'course', 'temp', 'spin', 'remaining_time']) {
             assert.ok(components[c], `component ${c} present`)
         }
-        // machine_state enum includes the four known states.
+        // machine_state enum includes the published states (DisplayOn is filtered).
         const msOptions = components.machine_state.options as string[]
         assert.ok(msOptions.includes('Standby'))
         assert.ok(msOptions.includes('Running'))
         assert.ok(msOptions.includes('Weighing'))
+        assert.ok(!msOptions.includes('DisplayOn'), 'DisplayOn must not appear in options')
         // cycle_phase enum must include SpinRamp (range-based, not in the static map).
         const cpOptions = components.cycle_phase.options as string[]
         assert.ok(cpOptions.includes('SpinRamp'))
@@ -153,11 +155,12 @@ describe(MODEL_ID, () => {
         assert.equal(p.remaining_time, 55)
     })
 
-    test('0x00-variant DisplayOn (Turbowash 39 selected) reads correct course', () => {
+    test('0x00-variant DisplayOn (Turbowash 39 selected) reads correct course, run_state suppressed', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_DISPLAY_ON)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.machine_state, 'DisplayOn')
+        // DisplayOn is filtered — machine_state stays at last meaningful state
+        assert.equal(p.machine_state, undefined)
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
     })
@@ -175,14 +178,14 @@ describe(MODEL_ID, () => {
 
     test('unknown ST byte (0x4d telemetry burst) is suppressed', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', DISPLAY_ON)
-        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'DisplayOn')
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Running')
         // 0x4d = telemetry burst, not a mapped state
         const telemetry = buf(
             'aaff200a00300003a50001014d001e0302000d022b027a024f0255024b025e022e027202130216021d02880204fb5bbb',
         )
         thinq.emit('data', telemetry)
-        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'DisplayOn')
+        assert.equal(ha.devices[DEVICE_ID].properties.machine_state, 'Running')
     })
 
     test('boot-up packet: locator picks status sub-block at offset 64, not device-info at 14', () => {
