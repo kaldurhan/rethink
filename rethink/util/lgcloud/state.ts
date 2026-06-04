@@ -5,7 +5,7 @@
 import * as fs from 'node:fs'
 import { type State } from './monitor'
 
-export const DEFAULT_STATE_FILE = 'oauth.json'
+export const DEFAULT_STATE_FILE = '/data/oauth.json'
 
 // Returns a State only if the file exists and is complete; a missing, partial or corrupt
 // file yields undefined ("not logged in").
