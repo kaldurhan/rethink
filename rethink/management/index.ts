@@ -10,7 +10,7 @@ import { Bridge } from '@/bridge'
 import { Request, Response } from 'express'
 import { Device as T1Device } from '@/cloud/thinq1/device'
 import { Device as T2Device } from '@/cloud/thinq2/device'
-import { createSubscription, connectWithSubscription, type Subscription } from '@/util/lgcloud/monitor'
+import { connect } from '@/util/lgcloud/monitor'
 import { loadState, saveState } from '@/util/lgcloud/state'
 import { Client, signInUrl } from '@/bridge/thinqApi'
 import * as OAuth2 from '@/bridge/oauth2'
@@ -255,9 +255,10 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
     // started so subsequent connections don't need to re-run the slow openssl /
     // certificate API round-trip. All browser subscribers share one feed.
     let cloudMqtt: MqttClient | undefined
-    let cloudSubscription: Subscription | undefined
     let cloudConnecting = false
     let cloudSubscribers: ExtendedWebSocket[] = []
+    let lastCertGeneratedAt = 0
+    const CERT_MIN_INTERVAL = 65_000 // LG rate-limits cert generation; ~60 s observed
 
     function broadcastCloud(message: object) {
         const str = JSON.stringify(message)
@@ -270,6 +271,17 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
 
     async function ensureCloudConnected() {
         if (cloudMqtt || cloudConnecting) return
+
+        // Respect LG's cert-generation rate limit. If we just generated a cert,
+        // wait out the remainder of the cooldown window before trying again.
+        const sinceLastCert = Date.now() - lastCertGeneratedAt
+        if (sinceLastCert < CERT_MIN_INTERVAL) {
+            const wait = CERT_MIN_INTERVAL - sinceLastCert
+            broadcastCloud({ cloudStatus: `reconnecting in ${Math.ceil(wait / 1000)}s…` })
+            setTimeout(ensureCloudConnected, wait)
+            return
+        }
+
         cloudConnecting = true
         broadcastCloud({ cloudStatus: 'connecting' })
         try {
@@ -278,16 +290,11 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 broadcastCloud({ cloudStatus: 'not-logged-in' })
                 return
             }
-            if (!cloudSubscription) {
-                broadcastCloud({ cloudStatus: 'generating certificate…' })
-                cloudSubscription = await createSubscription(state)
-            }
+            broadcastCloud({ cloudStatus: 'generating certificate…' })
+            lastCertGeneratedAt = Date.now()
 
-            // Track whether this attempt ever reached 'connected'. If the connection
-            // closes before that, LG likely invalidated the cert on the previous
-            // disconnect — clear it so the next attempt generates a fresh one.
             let didConnect = false
-            cloudMqtt = await connectWithSubscription(state, cloudSubscription, {
+            cloudMqtt = await connect(state, {
                 onMessage: (msg) => broadcastCloud({ cloud: msg }),
                 log: (m) => {
                     log('CLOUD', m)
@@ -299,8 +306,9 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                     if (m === '_close') {
                         broadcastCloud({ cloudStatus: 'reconnecting' })
                         cloudMqtt = undefined
-                        if (!didConnect) cloudSubscription = undefined
-                        setTimeout(ensureCloudConnected, 5000)
+                        // Short delay if we were connected (rate limit window likely passed);
+                        // ensureCloudConnected will enforce the cooldown if needed.
+                        setTimeout(ensureCloudConnected, didConnect ? 5000 : 2000)
                         return
                     }
                     if (m === '_offline') return
@@ -310,9 +318,6 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
         } catch (err) {
             log('CLOUD', `connection failed: ${err}`)
             broadcastCloud({ cloudStatus: `error: ${err}` })
-            if (`${err}`.includes('9006') || `${err}`.toLowerCase().includes('certificate')) {
-                cloudSubscription = undefined
-            }
         } finally {
             cloudConnecting = false
         }
