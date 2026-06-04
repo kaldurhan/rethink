@@ -33,6 +33,12 @@ const COOLDOWN = buf(
     'aaff300a0064008ded00020103002907100305070101047502090300150009050903030004000000000000000045003c0000000000010133010500255344485f58375f373030380000000000000000000102bf220b8b01070000000000000000007c7ebb',
 )
 
+// Captured from real device: info-class packet (inner[8]=0x02) emitted while
+// cycle is paused. ST=0x03 in this context means Paused, not Cooldown.
+const PAUSED_INFO_CLASS = buf(
+    'aaff300a00510093b20002010300160c1003050c010804ce030604000f0013040000000305010500255344485f58375f373030380000000000000000000102c08a7848060700000000000000000035edbb',
+)
+
 // Running packet with TR=0 in sub2 — the post-cycle anti-wrinkle tumble.
 // Captured at 12:38:35 immediately after the End packet.
 const POST_CYCLE_TUMBLE = buf(
@@ -73,6 +79,7 @@ describe(MODEL_ID, () => {
         const opts = cfg.run_state.options as string[]
         assert.ok(opts.includes('Standby'))
         assert.ok(opts.includes('Running'))
+        assert.ok(opts.includes('Paused'))
         assert.ok(opts.includes('Cooldown'))
         assert.ok(opts.includes('AntiCrease'))
         assert.ok(opts.includes('End'))
@@ -141,12 +148,37 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Drying')
     })
 
-    test('cooldown → run_state=Cooldown, info-class packet does not update program/phase', () => {
+    test('info-class ST=0x03 (originally labelled COOLDOWN) → run_state=Paused, program/phase untouched', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COOLDOWN)
-        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Cooldown')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
         assert.equal(ha.devices[DEVICE_ID].properties.phase, undefined)
         assert.equal(ha.devices[DEVICE_ID].properties.program, undefined)
+    })
+
+    test('info-class ST=0x03 while running → run_state=Paused (not Cooldown)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        thinq.emit('data', PAUSED_INFO_CLASS)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
+    })
+
+    test('info-class pause does not update program or phase', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        thinq.emit('data', PAUSED_INFO_CLASS)
+        assert.equal(ha.devices[DEVICE_ID].properties.program, 'Quick Dry 30')
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 30)
+    })
+
+    test('Running after Paused → run_state=Running', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        thinq.emit('data', PAUSED_INFO_CLASS)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('anti-crease → run_state=AntiCrease', () => {

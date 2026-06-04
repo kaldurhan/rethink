@@ -199,11 +199,16 @@ export default class Device extends AABBDevice {
         // publishing a garbage label and disrupting the HA sensor.
         if (stateLabel === undefined) return
 
+        const subStart = inner.length >= 32 ? findStatusSubBlock(inner) : -1
+        const sub = subStart >= 0 ? inner.subarray(subStart, subStart + 21) : null
+
+        // Post-cycle anti-crease tumble: ST=Running but phase=0x0000 (Finished).
+        // The drum keeps spinning after the cycle ends — suppress so End stays visible.
+        if (st === 0xec && sub && sub[1] === 0x00 && sub[2] === 0x00) return
+
         // DisplayOn is transient user-browsing; keep the last meaningful state visible.
-        // Exception: if run_state is unknown (server just restarted) or stuck at
-        // 'DisplayOn' (stale MQTT retained message from before the suppress fix),
-        // publish Standby so the broker's retained value is corrected.
-        // Sub-block processing continues so course/spin/temp stay current.
+        // Exception: empty cache or stale 'DisplayOn' retained value → publish Standby
+        // so the broker's retained message is corrected.
         if (st !== 0xeb) {
             this.publishProperty('run_state', stateLabel)
         } else {
@@ -211,12 +216,7 @@ export default class Device extends AABBDevice {
             if (!cached || cached === 'DisplayOn') this.publishProperty('run_state', 'Standby')
         }
 
-        // Short standby packet — no sub-block, leave other props untouched.
-        if (inner.length < 32) return
-
-        const subStart = findStatusSubBlock(inner)
-        if (subStart < 0) return
-        const sub = inner.subarray(subStart, subStart + 21)
+        if (!sub) return
 
         const phase = decodePhase(sub[1], sub[2])
         this.publishProperty('cycle_phase', phase)

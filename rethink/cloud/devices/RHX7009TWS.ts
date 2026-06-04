@@ -41,7 +41,9 @@ const COURSES: Record<number, string> = {
 const PHASES: Record<number, string> = {
     0x0503: 'Idle',
     0x0309: 'Heating',
+    0x0307: 'Heating', // transient variant seen immediately after resume
     0x0701: 'Drying',
+    0x0703: 'Drying', // transient variant seen immediately after resume
     0x0710: 'Cooldown',
 }
 
@@ -78,7 +80,7 @@ export default class Device extends AABBDevice {
                         name: 'Run state',
                         icon: 'mdi:state-machine',
                         device_class: 'enum',
-                        options: ['Standby', 'Running', 'Cooldown', 'AntiCrease', 'End'],
+                        options: ['Standby', 'Running', 'Paused', 'Cooldown', 'AntiCrease', 'End'],
                     },
                     program: {
                         platform: 'sensor',
@@ -168,11 +170,18 @@ export default class Device extends AABBDevice {
         // Standby/DisplayOn arrives.
         if (st === 0xec && tr === 0) return
 
-        // DisplayOn is transient user-browsing; keep the last meaningful state visible.
-        // Exception: if run_state is unknown (server just restarted) or stuck at
-        // 'DisplayOn' (stale MQTT retained message from before the suppress fix),
-        // publish Standby so the broker's retained value is corrected.
-        // Sub-block processing continues so program/phase/dryness stay current.
+        // Info-class packets (inner[8]=0x02) use a different byte layout — CS/TR/phase
+        // offsets are unreliable. ST=0x03 in an info-class packet means Paused (the
+        // firmware sends info-class bursts while the door is held open / cycle paused),
+        // not Cooldown. All other info-class ST values are suppressed.
+        if (isInfoClass) {
+            if (st === 0x03) this.publishProperty('run_state', 'Paused')
+            return
+        }
+
+        // DisplayOn (0xeb) is transient user-browsing; keep the last meaningful state.
+        // Exception: empty cache or stale 'DisplayOn' retained value → publish Standby
+        // so the broker's retained message is corrected.
         if (st !== 0xeb) {
             this.publishProperty('run_state', stateLabel)
         } else {
@@ -186,9 +195,6 @@ export default class Device extends AABBDevice {
 
         // Short/standby packet — leave other properties untouched
         if (inner.length < 24) return
-
-        // Info-class packets: only ST is valid, skip CS/TR/phase.
-        if (isInfoClass) return
 
         const csOffset = hasSub2 ? sub2Start + 5 : 18
         const cs = inner[csOffset]

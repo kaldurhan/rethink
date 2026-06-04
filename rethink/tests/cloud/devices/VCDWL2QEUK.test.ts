@@ -213,6 +213,19 @@ describe(MODEL_ID, () => {
         assert.equal(p.temp, '40')
     })
 
+    test('post-cycle tumble (Running phase=0x0000) is suppressed — End state preserved', () => {
+        const { ha, thinq } = makeDevice()
+        // Put device into End state first
+        const endFrame = synthFrame(0x10, 0x0e, 0x06, 0x2b, 0x00, 0x00)
+        endFrame[12] = 0x04 // inner[10] = ST=End
+        thinq.emit('data', endFrame)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
+        // Post-cycle tumble: ST=Running, phase=(0x00,0x00) = Finished
+        const tumbleFrame = synthFrame(0x00, 0x00, 0x06, 0x2b, 0x00, 0x00)
+        thinq.emit('data', tumbleFrame)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
+    })
+
     // Temperature scroll captures. Expected values reflect the LAST sub-block
     // (the parser's locator picks the highest-offset sub-block).
     // During scroll transitions, the phase may be non-Idle, so temp is not
@@ -344,13 +357,15 @@ describe(MODEL_ID, () => {
         assert.equal(p.course, 'Blandmaterial')
     })
 
-    test('post-cycle Running packet (phA=0x00, phB=0x00) → cycle_phase=Finished', () => {
+    test('post-cycle Running packet (phA=0x00, phB=0x00) is suppressed — prior state preserved', () => {
         const { ha, thinq } = makeDevice()
+        // Establish End state first, then send the post-cycle tumble packet
+        thinq.emit('data', END_OF_CYCLE)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
         thinq.emit('data', RUNNING_FINISHED)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.run_state, 'Running')
-        assert.equal(p.cycle_phase, 'Finished')
-        assert.equal(p.course, 'Blandmaterial')
+        assert.equal(p.run_state, 'End')
+        assert.equal(p.cycle_phase, undefined)
     })
 
     test('setProperty is a no-op (sensors-only v1)', () => {
