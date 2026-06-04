@@ -179,6 +179,19 @@ function connectCloud() {
     }
 }
 
+// Strip known-noisy ThinQ cloud shadow metadata fields before display.
+// Keeps all actual device state; removes fields that never carry useful info.
+function cleanPayload(payload) {
+    const reported = payload?.data?.state?.reported
+    if (!reported || typeof reported !== 'object') return payload
+    const cleaned = { ...reported }
+    delete cleaned.meta
+    delete cleaned.static
+    delete cleaned.mid
+    delete cleaned.timestamp
+    return { ...payload, data: { ...payload.data, state: { ...payload.data.state, reported: cleaned } } }
+}
+
 function pushCloudMessage(msg) {
     const feed = get('cloud_messages')
 
@@ -196,7 +209,7 @@ function pushCloudMessage(msg) {
     wrapper.appendChild(topicEl)
 
     const pre = document.createElement('pre')
-    pre.innerText = msg.payload !== null ? JSON.stringify(msg.payload, null, 2) : msg.raw
+    pre.innerText = msg.payload !== null ? JSON.stringify(cleanPayload(msg.payload), null, 2) : msg.raw
     wrapper.appendChild(pre)
 
     feed.appendChild(wrapper)
