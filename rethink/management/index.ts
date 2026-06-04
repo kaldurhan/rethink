@@ -268,25 +268,6 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
         })
     }
 
-    const cloudOpts = () => ({
-        onMessage: (msg: object) => broadcastCloud({ cloud: msg }),
-        log: (m: string) => {
-            log('CLOUD', m)
-            if (m === '_close') {
-                broadcastCloud({ cloudStatus: 'reconnecting' })
-                cloudMqtt = undefined
-                setTimeout(ensureCloudConnected, 5000)
-                return
-            }
-            if (m === '_offline') return
-            if (m === 'connected') {
-                broadcastCloud({ cloudStatus: 'connected' })
-                return
-            }
-            broadcastCloud({ cloudStatus: m })
-        },
-    })
-
     async function ensureCloudConnected() {
         if (cloudMqtt || cloudConnecting) return
         cloudConnecting = true
@@ -297,18 +278,38 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 broadcastCloud({ cloudStatus: 'not-logged-in' })
                 return
             }
-            // Reuse cached subscription (cert/key) to avoid hitting LG's cert
-            // generation rate limit (error 9006). Only regenerate when explicitly
-            // cleared (e.g. after a cert-rejection error).
             if (!cloudSubscription) {
                 broadcastCloud({ cloudStatus: 'generating certificate…' })
                 cloudSubscription = await createSubscription(state)
             }
-            cloudMqtt = await connectWithSubscription(state, cloudSubscription, cloudOpts())
+
+            // Track whether this attempt ever reached 'connected'. If the connection
+            // closes before that, LG likely invalidated the cert on the previous
+            // disconnect — clear it so the next attempt generates a fresh one.
+            let didConnect = false
+            cloudMqtt = await connectWithSubscription(state, cloudSubscription, {
+                onMessage: (msg) => broadcastCloud({ cloud: msg }),
+                log: (m) => {
+                    log('CLOUD', m)
+                    if (m === 'connected') {
+                        didConnect = true
+                        broadcastCloud({ cloudStatus: 'connected' })
+                        return
+                    }
+                    if (m === '_close') {
+                        broadcastCloud({ cloudStatus: 'reconnecting' })
+                        cloudMqtt = undefined
+                        if (!didConnect) cloudSubscription = undefined
+                        setTimeout(ensureCloudConnected, 5000)
+                        return
+                    }
+                    if (m === '_offline') return
+                    broadcastCloud({ cloudStatus: m })
+                },
+            })
         } catch (err) {
             log('CLOUD', `connection failed: ${err}`)
             broadcastCloud({ cloudStatus: `error: ${err}` })
-            // If the cert was rejected, clear it so the next attempt regenerates.
             if (`${err}`.includes('9006') || `${err}`.toLowerCase().includes('certificate')) {
                 cloudSubscription = undefined
             }
