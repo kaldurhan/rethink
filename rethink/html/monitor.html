@@ -291,15 +291,26 @@
                 <div class="panel-body">
                     <div class="panel-title-row" style="margin: 6px 0 4px">
                         <strong>Notifications</strong>
-                        <label>
-                            Auto-scroll&nbsp;
-                            <span class="switch">
-                                <label
-                                    >Off <input id="cloud_autoscroll" type="checkbox" checked />
-                                    <span class="lever"></span>On</label
-                                >
-                            </span>
-                        </label>
+                        <div style="display: flex; gap: 16px; align-items: center">
+                            <label>
+                                Status log&nbsp;
+                                <span class="switch">
+                                    <label
+                                        >Off <input id="cloud_show_status" type="checkbox" checked />
+                                        <span class="lever"></span>On</label
+                                    >
+                                </span>
+                            </label>
+                            <label>
+                                Auto-scroll&nbsp;
+                                <span class="switch">
+                                    <label
+                                        >Off <input id="cloud_autoscroll" type="checkbox" checked />
+                                        <span class="lever"></span>On</label
+                                    >
+                                </span>
+                            </label>
+                        </div>
                     </div>
 
                     <div class="messages" id="cloud_messages"></div>

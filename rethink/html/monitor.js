@@ -113,7 +113,8 @@ function setCloudStatus(raw) {
     el.innerText = known ? known.text : raw
     el.className = 'status_value' + (known?.cls ? ' ' + known.cls : '')
     get('cloud_login').style.display = raw === 'not-logged-in' ? 'block' : 'none'
-    if (!known) pushCloudLog(raw)
+    if (get('cloud_show_status').checked)
+        pushCloudLog(known ? known.text : raw, known?.cls || (raw.startsWith('error') ? 'err' : ''))
 }
 
 // ── Cloud login flow ─────────────────────────────────────────────────────────
@@ -206,10 +207,10 @@ function pushCloudMessage(msg) {
     if (get('cloud_autoscroll').checked) feed.scrollTop = feed.scrollHeight
 }
 
-function pushCloudLog(text) {
+function pushCloudLog(text, cls) {
     const feed = get('cloud_messages')
     const div = document.createElement('div')
-    div.className = 'cloud-status-line'
+    div.className = 'cloud-status-line' + (cls ? ' ' + cls : '')
     div.innerText = new Date().toLocaleTimeString() + '  ' + text
     feed.appendChild(div)
     if (get('cloud_autoscroll').checked) feed.scrollTop = feed.scrollHeight
