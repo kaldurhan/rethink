@@ -16,6 +16,9 @@
 // responsibility — see ./state.ts. The module itself does no file I/O.
 
 import readline from 'node:readline'
+import { writeFileSync, unlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import mqtt from 'mqtt'
 import * as OAuth2 from '@/bridge/oauth2'
 import { subprocess } from '@/bridge/util'
@@ -56,12 +59,25 @@ async function oauth2Login(client: Client): Promise<string> {
 async function generateSubscription(client: Client): Promise<Subscription> {
     // non-interactive; requires an authenticated client
     const privateKey = await subprocess('openssl', ['genrsa', '2048'])
-    // openssl req can't read the key from node's socket-backed stdin directly; pipe via cat.
-    const csr = await subprocess(
-        'bash',
-        ['-c', `cat | openssl req -new -key /dev/stdin -subj '/CN=AWS IoT Certificate/O=Amazon'`],
-        privateKey,
-    )
+    // Write the key to a temp file: openssl req can't read from Node's socket-backed
+    // stdin, and bash is not available in all container environments.
+    const tmpKeyPath = join(tmpdir(), `rethink-lgcloud-${Date.now()}.pem`)
+    writeFileSync(tmpKeyPath, privateKey, { mode: 0o600 })
+    let csr: string
+    try {
+        csr = await subprocess('openssl', [
+            'req',
+            '-new',
+            '-key',
+            tmpKeyPath,
+            '-subj',
+            '/CN=AWS IoT Certificate/O=Amazon',
+        ])
+    } finally {
+        try {
+            unlinkSync(tmpKeyPath)
+        } catch {}
+    }
 
     const { thinq2Uri } = await client.gateway
     const response = await apiFetch<CertificateResponse>(`${thinq2Uri}/service/users/client/certificate`, {
