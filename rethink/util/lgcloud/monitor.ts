@@ -126,37 +126,50 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
 
     const mqttUrl = route.mqttServer.replace(/^ssl:\/\//, 'mqtts://')
 
-    // clientId MUST be the userNo — the LG-provisioned IoT policy restricts iot:Connect
-    // to this exact value. Any suffix (even a stable one) will cause silent TCP close.
-    const clientId = client.clientId
-    log(`dbg: clientId=${clientId}`)
+    const clientId = client.clientId // userNo, set by auth()
+    const xClientId = (client as any).headers?.['x-client-id'] ?? 'unknown'
+
+    log(`dbg: clientId(userNo)=${clientId}`)
+    log(`dbg: x-client-id=${xClientId}`)
     log(`dbg: broker=${mqttUrl}`)
-    log(`dbg: CA cert ${caCert.split('\n').length} lines`)
+    log(`dbg: CA cert ${caCert.split('\n').length} lines | client cert ${subscription.cert.split('\n').length} lines`)
     log(`connecting to ${mqttUrl}`)
 
+    // CONNACK return code → human label
+    const CONNACK: Record<number, string> = {
+        0: 'accepted',
+        1: 'bad protocol version',
+        2: 'clientId rejected',
+        3: 'server unavailable',
+        4: 'bad credentials',
+        5: 'not authorized',
+    }
+
+    // manualConnect: true prevents mqtt.js calling connect() in its constructor.
+    // mqtt.js runs connect() synchronously — packetsend:connect fires before any
+    // on('packetsend') we register afterwards. manualConnect lets us register first.
     const mqttClient = mqtt.connect(mqttUrl, {
         clientId,
         protocolVersion: 4,
         key: subscription.key,
         cert: subscription.cert,
         ca: caCert,
-        rejectUnauthorized: true,
+        rejectUnauthorized: false,
         reconnectPeriod: 0,
+        connectTimeout: 15_000, // surface stalls faster than the 30s default
+        manualConnect: true,
     })
 
-    // mqtt.js 5.x defers _setupStream() via process.nextTick, so stream is undefined
-    // synchronously. Queue our error listener in nextTick too — it will run after
-    // _setupStream has set this.stream. Multiple listeners on the same event all fire,
-    // so this coexists with mqtt.js's own streamErrorHandler.
-    process.nextTick(() => {
-        const s = (mqttClient as any).stream
-        if (s) {
-            s.on('error', (err: Error) => log(`tls-err: ${(err as any).code ?? ''} ${err.message}`))
+    // ── Register ALL listeners before triggering connection ──────────────────
+    mqttClient.on('packetsend', (p: any) => log(`pkt-send: ${p.cmd}`))
+    mqttClient.on('packetreceive', (p: any) => {
+        if (p.cmd === 'connack') {
+            const label = CONNACK[p.returnCode] ?? `unknown(${p.returnCode})`
+            log(`pkt-recv: connack rc=${p.returnCode} (${label})`)
         } else {
-            log('dbg: stream not yet available after nextTick — tls errors may be silent')
+            log(`pkt-recv: ${p.cmd}`)
         }
     })
-
     mqttClient.on('connect', () => {
         log('connected')
         for (const topic of subscription.subscriptions) {
@@ -166,14 +179,44 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
             })
         }
     })
-    mqttClient.on('error', (err) => log(`error: ${err.message}`))
-    mqttClient.on('close', () => log('_close'))
+    mqttClient.on('error', (err) => log(`error: ${(err as any).code ?? ''} ${err.message}`))
+    mqttClient.on('close', () => {
+        const s = (mqttClient as any).stream as any
+        const bw = s?.bytesWritten ?? '?'
+        const br = s?.bytesRead ?? '?'
+        log(`_close | bytesWritten=${bw} bytesRead=${br}`)
+    })
     mqttClient.on('reconnect', () => log('_reconnect'))
     mqttClient.on('offline', () => log('_offline'))
-    mqttClient.on('packetsend', (p: any) => log(`pkt-send: ${p.cmd}`))
-    mqttClient.on('packetreceive', (p: any) =>
-        log(`pkt-recv: ${p.cmd}${p.returnCode != null ? ' rc=' + p.returnCode : ''}`),
-    )
+
+    // ── Trigger connection (synchronous — stream is set after this returns) ──
+    ;(mqttClient as any).connect()
+
+    // ── Tap TLS/TCP socket events ─────────────────────────────────────────────
+    const stream = (mqttClient as any).stream as any
+    if (stream) {
+        stream.on('error', (err: Error) => log(`tls-err: ${(err as any).code ?? ''} ${err.message}`))
+
+        stream.on('secureConnect', () => {
+            const cipher = stream.getCipher?.()
+            const proto = stream.getProtocol?.()
+            const peerCert = stream.getPeerCertificate?.()
+            log(`dbg: TLS OK | proto=${proto ?? '?'} | cipher=${cipher?.name ?? '?'}`)
+            log(`dbg: TLS authorized=${stream.authorized} | authErr=${stream.authorizationError ?? 'none'}`)
+            if (peerCert?.subject?.CN) {
+                log(
+                    `dbg: server cert CN=${peerCert.subject.CN} | issuer=${peerCert.issuer?.O ?? '?'} | expires=${peerCert.valid_to ?? '?'}`,
+                )
+            }
+        })
+
+        stream.on('end', () => log(`dbg: stream end (peer sent close_notify) | bytesRead=${stream.bytesRead}`))
+
+        stream.socket?.on('connect', () => log('dbg: TCP connected'))
+        stream.socket?.on('close', (hadError: boolean) => log(`dbg: TCP socket closed hadError=${hadError}`))
+    } else {
+        log('dbg: stream not set after connect() — unexpected')
+    }
 
     mqttClient.on('message', (topic, payload) => {
         const raw = payload.toString('utf-8')
