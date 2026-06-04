@@ -2,33 +2,71 @@
 <html>
     <head>
         <style>
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                height: 100vh;
+                margin: 0;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
+
+            /* ── Two-panel layout ── */
+            #panels {
+                display: flex;
+                flex: 1;
+                min-height: 0;
+                overflow: hidden;
+            }
+
+            .panel {
+                display: flex;
+                flex-direction: column;
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+            }
+
+            .panel + .panel {
+                border-left: 2px solid #e0e0e0;
+            }
+
+            .panel-head {
+                padding: 8px 16px 0;
+                flex-shrink: 0;
+            }
+
+            .panel-body {
+                display: flex;
+                flex-direction: column;
+                flex: 1;
+                min-height: 0;
+                padding: 0 16px 8px;
+                overflow: hidden;
+            }
+
+            /* ── Status rows ── */
             .status_label {
                 width: 10em;
                 display: inline-block;
             }
-            .flex_x {
-                display: flex;
-                flex-direction: row;
-                align-items: center;
-            }
-            .flex_y {
-                display: flex;
-                flex-direction: column;
-            }
-            .flex_grow {
+
+            /* ── Message feed ── */
+            .messages {
                 flex: 1;
-            }
-            #messages {
-                border: solid 1px black;
+                min-height: 0;
+                border: solid 1px #bbb;
                 border-radius: 8px;
                 padding: 8px;
                 overflow-y: scroll;
                 margin-bottom: 8px;
-            }
-            body {
-                height: 100vh;
+                background: #fafafa;
             }
 
+            /* Device panel — binary packets */
             .message {
                 clear: both;
                 border: solid 1px black;
@@ -37,7 +75,6 @@
                 margin: 2px;
                 word-wrap: anywhere;
             }
-
             .tx.message {
                 float: right;
                 background: rgb(117, 42, 119);
@@ -47,11 +84,9 @@
                 float: left;
                 background: rgb(116, 171, 203);
             }
-
             .message.injected {
                 background: #c04040;
             }
-
             .message .timestamp {
                 background: #ffff80;
                 color: black;
@@ -65,8 +100,76 @@
                 float: right;
             }
 
+            /* Cloud panel — JSON notifications */
+            .cloud-message {
+                border: 1px solid #90caf9;
+                border-radius: 4px;
+                margin: 4px 0;
+                background: #e3f2fd;
+                overflow: hidden;
+            }
+            .cloud-message .cloud-topic {
+                background: #1565c0;
+                color: #fff;
+                font-size: 0.78em;
+                font-family: monospace;
+                padding: 2px 8px;
+                word-break: break-all;
+            }
+            .cloud-message pre {
+                margin: 0;
+                padding: 6px 8px;
+                font-size: 0.78em;
+                white-space: pre-wrap;
+                word-break: break-all;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            .cloud-message .cloud-ts {
+                float: right;
+                background: #ffff80;
+                color: #333;
+                font-size: 0.75em;
+                padding: 0 4px;
+                margin-left: 8px;
+            }
+            .cloud-status-line {
+                font-size: 0.85em;
+                color: #555;
+                font-style: italic;
+                padding: 2px 4px;
+                margin: 2px 0;
+            }
+            .cloud-status-line.ok {
+                color: #2e7d32;
+                font-style: normal;
+            }
+            .cloud-status-line.err {
+                color: #b71c1c;
+                font-style: normal;
+            }
+            .cloud-status-line.warn {
+                color: #e65100;
+            }
+
+            /* ── Inputs ── */
+            .flex_x {
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+            }
+            .flex_grow {
+                flex: 1;
+            }
             .reduced_margins .input-field {
                 margin: 4px;
+            }
+
+            /* ── Autoscroll toggle ── */
+            .panel-title-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
             }
         </style>
         <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
@@ -77,7 +180,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     </head>
 
-    <body class="flex_y">
+    <body>
         <nav class="light-blue lighten-1" role="navigation">
             <div class="nav-wrapper container">
                 <a id="logo-container" href="/" class="brand-logo">
@@ -86,51 +189,124 @@
                 </a>
             </div>
         </nav>
-        <div class="container">
-            <h4 class="header orange-text">Device status</h4>
-            <span class="status_label">Device ID:</span> <span id="device_id" class="status_value"></span> <br />
-            <span class="status_label">Device model:</span> <span id="device_model" class="status_value"></span> <br />
-            <span class="status_label">Status:</span> <span id="device_status" class="status_value"></span> <br />
-        </div>
 
-        <div class="reduced_margins container flex_y flex_grow" style="overflow: hidden">
-            <h4 class="header orange-text">
-                Messages
-                <div style="float: right">
-                    <label for="autoscroll">Auto-scroll</label>
-                    <span class="switch">
-                        <label
-                            >Off <input id="autoscroll" type="checkbox" checked /> <span class="lever"></span>On</label
-                        >
-                    </span>
+        <div id="panels">
+            <!-- ══ LEFT: device MQTT monitor ══ -->
+            <div class="panel">
+                <div class="panel-head">
+                    <h5 class="orange-text" style="margin: 8px 0 4px">Device MQTT</h5>
+                    <span class="status_label">Device ID:</span>
+                    <span id="device_id" class="status_value"></span><br />
+                    <span class="status_label">Model:</span>
+                    <span id="device_model" class="status_value"></span><br />
+                    <span class="status_label">Status:</span>
+                    <span id="device_status" class="status_value"></span>
                 </div>
-            </h4>
-            <div class="flex_grow" id="messages"></div>
-            <div class="flex_x">
-                <div class="input-field flex_grow">
-                    <input id="send1" type="text" />
-                    <label for="send1">Send to device</label>
-                </div>
-                &nbsp;
-                <div class="input-field">
-                    <button disabled class="btn waves-effect waves-light" id="btn_send1">
-                        Send <i class="material-icons right">send</i>
-                    </button>
+
+                <div class="panel-body reduced_margins">
+                    <div class="panel-title-row" style="margin: 6px 0 4px">
+                        <strong>Messages</strong>
+                        <label>
+                            Auto-scroll&nbsp;
+                            <span class="switch">
+                                <label
+                                    >Off <input id="autoscroll" type="checkbox" checked />
+                                    <span class="lever"></span>On</label
+                                >
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="messages" id="messages"></div>
+
+                    <div class="flex_x">
+                        <div class="input-field flex_grow">
+                            <input id="send1" type="text" />
+                            <label for="send1">Send to device</label>
+                        </div>
+                        &nbsp;
+                        <div class="input-field">
+                            <button disabled class="btn waves-effect waves-light" id="btn_send1">
+                                Send <i class="material-icons right">send</i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex_x">
+                        <div class="input-field">
+                            <button disabled class="btn waves-effect waves-light" id="btn_send2">
+                                Send <i class="material-icons left">send</i>
+                            </button>
+                        </div>
+                        &nbsp;
+                        <div class="input-field flex_grow">
+                            <input id="send2" type="text" />
+                            <label for="send2">Inject from device</label>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="flex_x">
-                <div class="input-field">
-                    <button disabled class="btn waves-effect waves-light" id="btn_send2">
-                        Send <i class="material-icons left">send</i>
-                    </button>
+
+            <!-- ══ RIGHT: LG cloud notification monitor ══ -->
+            <div class="panel">
+                <div class="panel-head">
+                    <h5 class="orange-text" style="margin: 8px 0 4px">LG Cloud MQTT</h5>
+                    <span class="status_label">Status:</span>
+                    <span id="cloud_status" class="status_value">Connecting…</span><br />
+                    <span class="status_label">Messages:</span>
+                    <span id="cloud_count" class="status_value">0</span>
                 </div>
-                &nbsp;
-                <div class="input-field flex_grow">
-                    <input id="send2" type="text" />
-                    <label for="send2">Inject from device</label>
+
+                <!-- Login section — visible only when not logged in -->
+                <div
+                    id="cloud_login"
+                    style="display: none; padding: 4px 16px 8px; flex-shrink: 0; border-bottom: 1px solid #e0e0e0"
+                >
+                    <p style="color: #b71c1c; margin: 6px 0 8px; font-size: 0.9em">
+                        No LG account credentials found. Log in once to enable cloud notifications.
+                    </p>
+                    <div class="flex_x" style="gap: 8px; flex-wrap: wrap; align-items: flex-end">
+                        <div class="input-field" style="margin: 4px; min-width: 130px">
+                            <input id="cloud_cc" type="text" maxlength="2" style="text-transform: uppercase" />
+                            <label for="cloud_cc">Country code (e.g. SE)</label>
+                        </div>
+                        <div class="input-field" style="margin: 4px">
+                            <button class="btn waves-effect waves-light" id="btn_cloud_login">
+                                Open login page <i class="material-icons right">open_in_new</i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex_x" style="gap: 8px; flex-wrap: wrap; align-items: flex-end">
+                        <div class="input-field flex_grow" style="margin: 4px">
+                            <input id="cloud_login_url" type="text" />
+                            <label for="cloud_login_url">Paste the post-login URL here</label>
+                        </div>
+                        <div class="input-field" style="margin: 4px">
+                            <button class="btn waves-effect waves-light" id="btn_cloud_login_complete">
+                                Complete login <i class="material-icons right">login</i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-body">
+                    <div class="panel-title-row" style="margin: 6px 0 4px">
+                        <strong>Notifications</strong>
+                        <label>
+                            Auto-scroll&nbsp;
+                            <span class="switch">
+                                <label
+                                    >Off <input id="cloud_autoscroll" type="checkbox" checked />
+                                    <span class="lever"></span>On</label
+                                >
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="messages" id="cloud_messages"></div>
                 </div>
             </div>
         </div>
+        <!-- #panels -->
 
         <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
         <script src="monitor.js"></script>
