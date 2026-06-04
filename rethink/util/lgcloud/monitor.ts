@@ -115,7 +115,6 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
         key: subscription.key,
         cert: subscription.cert,
         ca: caCert,
-        ALPNProtocols: ['x-amzn-mqtt-ca'],
         rejectUnauthorized: true,
     })
 

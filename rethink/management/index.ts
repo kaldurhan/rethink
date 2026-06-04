@@ -300,7 +300,8 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                     broadcastCloud({ cloudStatus: m })
                 },
             })
-            broadcastCloud({ cloudStatus: 'connected' })
+            // Do NOT broadcast 'connected' here — openMQTT returns the client before
+            // the TCP/MQTT handshake completes. The 'connected' MQTT event above handles it.
         } catch (err) {
             log('CLOUD', `connection failed: ${err}`)
             broadcastCloud({ cloudStatus: `error: ${err}` })
