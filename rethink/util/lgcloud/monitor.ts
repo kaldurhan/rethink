@@ -126,11 +126,14 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
 
     const mqttUrl = route.mqttServer.replace(/^ssl:\/\//, 'mqtts://')
 
-    const clientId = client.clientId // userNo, set by auth()
-    const xClientId = (client as any).headers?.['x-client-id'] ?? 'unknown'
+    // IoT policy allows iot:Connect only for clientId = x-client-id (the app identifier).
+    // userNo is wrong — AWS IoT closes without CONNACK when clientId doesn't match the policy.
+    // Confirmed by: topic path t20/op/{x-client-id}/inbox and bytesRead=0 diagnostic.
+    const clientId = (client as any).headers['x-client-id'] as string
+    const userNo = client.clientId
 
-    log(`dbg: clientId(userNo)=${clientId}`)
-    log(`dbg: x-client-id=${xClientId}`)
+    log(`dbg: clientId(x-client-id)=${clientId}`)
+    log(`dbg: userNo=${userNo}`)
     log(`dbg: broker=${mqttUrl}`)
     log(`dbg: CA cert ${caCert.split('\n').length} lines | client cert ${subscription.cert.split('\n').length} lines`)
     log(`connecting to ${mqttUrl}`)
