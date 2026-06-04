@@ -23,7 +23,7 @@ import { randomBytes } from 'node:crypto'
 import mqtt from 'mqtt'
 import * as OAuth2 from '@/bridge/oauth2'
 import { subprocess } from '@/bridge/util'
-import { Client, IOT_BASE_URL, RouteCertResponse, RouteResponse, apiFetch, signInUrl } from '@/bridge/thinqApi'
+import { Client, IOT_BASE_URL, RouteResponse, apiFetch, signInUrl } from '@/bridge/thinqApi'
 
 export type Subscription = { key: string; cert: string; subscriptions: string[] }
 export type State = { countryCode: string; refreshToken: string }
@@ -100,12 +100,9 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
     const route = await apiFetch<RouteResponse>(`${IOT_BASE_URL}/route`, {
         headers: { 'x-country-code': client.env.countryCode, 'x-service-phase': 'OP', accept: 'application/json' },
     })
-    const { certificatePem: caCert } = await apiFetch<RouteCertResponse>(
-        `${IOT_BASE_URL}/route/certificate?name=aws-iot`,
-        { headers: { accept: 'application/json' } },
-    )
 
     const mqttUrl = route.mqttServer.replace(/^ssl:\/\//, 'mqtts://')
+    log(`connecting to ${mqttUrl}`)
     // Append a random suffix so this process gets its own AWS IoT slot and
     // doesn't fight the LG ThinQ mobile app (or other tools) for the same clientId.
     const clientId = (client.clientId || 'rethink') + '_' + randomBytes(4).toString('hex')
@@ -114,13 +111,14 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
         protocolVersion: 4,
         key: subscription.key,
         cert: subscription.cert,
-        ca: caCert,
-        rejectUnauthorized: true,
-        // Disable built-in reconnect — the caller regenerates a fresh cert on each
-        // reconnect attempt (LG's API appears to issue single-use certificates).
+        // Do NOT supply a custom ca — the LG /route/certificate endpoint returns a
+        // dev-environment CA that does not match the production MQTT broker. Use
+        // Node's system trust store instead (which contains Amazon Root CA 1).
         reconnectPeriod: 0,
     })
 
+    // mqtt.js v5 swallows TLS errors (only re-emits ECONNREFUSED/ECONNRESET/etc).
+    // Surface them by listening directly on the underlying socket.
     mqttClient.on('connect', () => {
         log('connected')
         for (const topic of subscription.subscriptions) {
@@ -133,6 +131,10 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
     mqttClient.on('close', () => log('_close'))
     mqttClient.on('reconnect', () => log('_reconnect'))
     mqttClient.on('offline', () => log('_offline'))
+    // Catch TLS errors that mqtt.js swallows (non-socket error codes go to noop).
+    ;(mqttClient as any).on('socket', (socket: any) => {
+        socket?.on('error', (err: Error) => log(`tls: ${err.message}`))
+    })
 
     mqttClient.on('message', (topic, payload) => {
         const raw = payload.toString('utf-8')
