@@ -281,6 +281,22 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 onMessage: (msg) => broadcastCloud({ cloud: msg }),
                 log: (m) => {
                     log('CLOUD', m)
+                    // Internal reconnect lifecycle events: log server-side only to avoid
+                    // spamming the browser. Surface clean human-readable states instead.
+                    if (m === '_close') {
+                        broadcastCloud({ cloudStatus: 'reconnecting' })
+                        return
+                    }
+                    if (m === '_reconnect') {
+                        return
+                    }
+                    if (m === '_offline') {
+                        return
+                    }
+                    if (m === 'connected') {
+                        broadcastCloud({ cloudStatus: 'connected' })
+                        return
+                    }
                     broadcastCloud({ cloudStatus: m })
                 },
             })

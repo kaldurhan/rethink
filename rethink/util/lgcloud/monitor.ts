@@ -19,6 +19,7 @@ import readline from 'node:readline'
 import { writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 import mqtt from 'mqtt'
 import * as OAuth2 from '@/bridge/oauth2'
 import { subprocess } from '@/bridge/util'
@@ -105,8 +106,11 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
     )
 
     const mqttUrl = route.mqttServer.replace(/^ssl:\/\//, 'mqtts://')
+    // Append a random suffix so this process gets its own AWS IoT slot and
+    // doesn't fight the LG ThinQ mobile app (or other tools) for the same clientId.
+    const clientId = (client.clientId || 'rethink') + '_' + randomBytes(4).toString('hex')
     const mqttClient = mqtt.connect(mqttUrl, {
-        clientId: client.clientId,
+        clientId,
         protocolVersion: 4,
         key: subscription.key,
         cert: subscription.cert,
@@ -124,9 +128,9 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
         }
     })
     mqttClient.on('error', (err) => log(`error: ${err.message}`))
-    mqttClient.on('close', () => log('close'))
-    mqttClient.on('reconnect', () => log('reconnect'))
-    mqttClient.on('offline', () => log('offline'))
+    mqttClient.on('close', () => log('_close'))
+    mqttClient.on('reconnect', () => log('_reconnect'))
+    mqttClient.on('offline', () => log('_offline'))
 
     mqttClient.on('message', (topic, payload) => {
         const raw = payload.toString('utf-8')

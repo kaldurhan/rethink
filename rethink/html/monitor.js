@@ -102,8 +102,9 @@ let cloudMessageCount = 0
 const CLOUD_STATUS_LABELS = {
     idle: { text: 'Idle', cls: '' },
     connecting: { text: 'Connecting…', cls: 'warn' },
+    reconnecting: { text: 'Reconnecting…', cls: 'warn' },
     connected: { text: 'Connected ✓', cls: 'ok' },
-    'not-logged-in': { text: 'Not logged in — run lgcloud-monitor once to authenticate', cls: 'err' },
+    'not-logged-in': { text: 'Not logged in — use the login form below', cls: 'err' },
 }
 
 function setCloudStatus(raw) {
