@@ -19,7 +19,7 @@ import readline from 'node:readline'
 import { writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, generateKeyPairSync } from 'node:crypto'
 import mqtt from 'mqtt'
 import * as OAuth2 from '@/bridge/oauth2'
 import { subprocess } from '@/bridge/util'
@@ -59,11 +59,17 @@ async function oauth2Login(client: Client): Promise<string> {
 
 async function generateSubscription(client: Client): Promise<Subscription> {
     // non-interactive; requires an authenticated client
-    const privateKey = await subprocess('openssl', ['genrsa', '2048'])
+    // Use Node.js crypto instead of openssl subprocess — avoids OpenSSL 3.x
+    // progress/deprecation text corrupting the PEM key output on Alpine.
+    const { privateKey } = generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: { type: 'pkcs1', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+    })
     // Write the key to a temp file: openssl req can't read from Node's socket-backed
     // stdin, and bash is not available in all container environments.
     const tmpKeyPath = join(tmpdir(), `rethink-lgcloud-${Date.now()}.pem`)
-    writeFileSync(tmpKeyPath, privateKey, { mode: 0o600 })
+    writeFileSync(tmpKeyPath, privateKey as string, { mode: 0o600 })
     let csr: string
     try {
         csr = await subprocess('openssl', [
