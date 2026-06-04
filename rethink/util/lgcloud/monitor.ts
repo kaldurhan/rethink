@@ -140,6 +140,11 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
     ;(mqttClient as any).on('socket', (socket: any) => {
         socket?.on('error', (err: Error) => log(`tls: ${err.message}`))
     })
+    // Packet-level trace to see if CONNACK arrives before the connection drops.
+    mqttClient.on('packetsend', (p: any) => log(`pkt-send: ${p.cmd}`))
+    mqttClient.on('packetreceive', (p: any) =>
+        log(`pkt-recv: ${p.cmd}${p.returnCode != null ? ' rc=' + p.returnCode : ''}`),
+    )
 
     mqttClient.on('message', (topic, payload) => {
         const raw = payload.toString('utf-8')
