@@ -69,11 +69,34 @@ const PHASES_VCDWL: Record<number, string> = {
     0x080e: 'SpinActive',
     0x0a0e: 'SpinActive',
     0x100e: 'Finished',
+    // 0x_0e variants observed in programme-selection sub-blocks (machine idle, user browsing).
+    // These share the low byte 0x0e with the operational rinse/spin phases above but are
+    // distinct codes that only appear while the drum is not running.
+    0x010e: 'Idle',
+    0x020e: 'Idle',
+    0x030e: 'Idle',
+    0x050e: 'Idle',
 }
 
 function decodePhase(phA: number, phB: number): string {
     if (phA === 0x18 && phB >= 0x12 && phB <= 0x1f) return 'SpinRamp'
     return PHASES_VCDWL[(phA << 8) | phB] ?? 'unknown'
+}
+
+/**
+ * Find the last 10 08 energy-tracking block in the inner buffer.
+ * Layout from block start:
+ *   [0..1]   = 10 08 (marker)
+ *   [2]      = course code
+ *   [11..12] = remaining time LE u16 (minutes)
+ *   [14..15] = courseSpendPower BE u16 (Wh)
+ */
+function findPowerBlock(inner: Buffer): number {
+    let found = -1
+    for (let i = 0; i <= inner.length - 16; i++) {
+        if (inner[i] === 0x10 && inner[i + 1] === 0x08) found = i
+    }
+    return found
 }
 
 /**
@@ -184,6 +207,25 @@ export default class Device extends AABBDevice {
                         unit_of_measurement: 'min',
                         state_class: 'measurement',
                     },
+                    course_spend_power: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-course_spend_power',
+                        state_topic: '$this/course_spend_power',
+                        name: 'Cycle energy',
+                        icon: 'mdi:lightning-bolt',
+                        unit_of_measurement: 'Wh',
+                        state_class: 'measurement',
+                        device_class: 'energy',
+                    },
+                    door: {
+                        platform: 'binary_sensor',
+                        unique_id: '$deviceid-door',
+                        state_topic: '$this/door',
+                        name: 'Door',
+                        device_class: 'door',
+                        payload_on: 'open',
+                        payload_off: 'closed',
+                    },
                 },
             }),
         )
@@ -191,6 +233,18 @@ export default class Device extends AABBDevice {
 
     processAABB(inner: Buffer) {
         if (inner.length < 11 || inner[0] !== 0x20) return
+
+        // 0x63 fires when door opens; 0x4c fires when door closes (both carry
+        // inner[10]=0x03 which is not in STATES_VCDWL — intercept before state check).
+        const packetType = inner[3]
+        if (packetType === 0x63) {
+            this.publishProperty('door', 'open')
+            return
+        }
+        if (packetType === 0x4c) {
+            this.publishProperty('door', 'closed')
+            return
+        }
 
         const st = inner[10]
         const stateLabel = STATES_VCDWL[st]
@@ -236,6 +290,14 @@ export default class Device extends AABBDevice {
         } else {
             const remaining = sub[13] | (sub[14] << 8)
             this.publishProperty('remaining_time', remaining)
+        }
+
+        // Extract cycle energy (Wh) from the 10 08 block present in Running packets.
+        // Block[+14..+15] = courseSpendPower, big-endian u16.
+        const powerBlock = findPowerBlock(inner)
+        if (powerBlock >= 0) {
+            const courseSpendPower = (inner[powerBlock + 14] << 8) | inner[powerBlock + 15]
+            this.publishProperty('course_spend_power', courseSpendPower)
         }
     }
 
