@@ -116,6 +116,9 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
         cert: subscription.cert,
         ca: caCert,
         rejectUnauthorized: true,
+        // Disable built-in reconnect — the caller regenerates a fresh cert on each
+        // reconnect attempt (LG's API appears to issue single-use certificates).
+        reconnectPeriod: 0,
     })
 
     mqttClient.on('connect', () => {

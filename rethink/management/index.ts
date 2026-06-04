@@ -281,13 +281,14 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 onMessage: (msg) => broadcastCloud({ cloud: msg }),
                 log: (m) => {
                     log('CLOUD', m)
-                    // Internal reconnect lifecycle events: log server-side only to avoid
-                    // spamming the browser. Surface clean human-readable states instead.
+                    // Internal lifecycle events: log server-side only.
                     if (m === '_close') {
                         broadcastCloud({ cloudStatus: 'reconnecting' })
-                        return
-                    }
-                    if (m === '_reconnect') {
+                        // Discard the closed client so ensureCloudConnected() will
+                        // call connect() fresh — LG issues single-use certificates
+                        // so mqtt.js built-in reconnect (same cert) always fails.
+                        cloudMqtt = undefined
+                        setTimeout(ensureCloudConnected, 5000)
                         return
                     }
                     if (m === '_offline') {
