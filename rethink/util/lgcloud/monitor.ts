@@ -19,7 +19,7 @@ import readline from 'node:readline'
 import { writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomBytes, generateKeyPairSync } from 'node:crypto'
+import { generateKeyPairSync } from 'node:crypto'
 import mqtt from 'mqtt'
 import * as OAuth2 from '@/bridge/oauth2'
 import { subprocess } from '@/bridge/util'
@@ -57,21 +57,22 @@ async function oauth2Login(client: Client): Promise<string> {
     return refreshToken
 }
 
-async function generateSubscription(client: Client): Promise<Subscription> {
-    // non-interactive; requires an authenticated client
-    // Use Node.js crypto instead of openssl subprocess — avoids OpenSSL 3.x
-    // progress/deprecation text corrupting the PEM key output on Alpine.
+async function generateSubscription(client: Client, log: (m: string) => void): Promise<Subscription> {
+    log('dbg: generating RSA key pair')
     const { privateKey } = generateKeyPairSync('rsa', {
         modulusLength: 2048,
         publicKeyEncoding: { type: 'pkcs1', format: 'pem' },
         privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
     })
+
     // Write the key to a temp file: openssl req can't read from Node's socket-backed
     // stdin, and bash is not available in all container environments.
     const tmpKeyPath = join(tmpdir(), `rethink-lgcloud-${Date.now()}.pem`)
     writeFileSync(tmpKeyPath, privateKey as string, { mode: 0o600 })
+
     let csr: string
     try {
+        log('dbg: generating CSR via openssl req')
         csr = await subprocess('openssl', [
             'req',
             '-new',
@@ -80,6 +81,10 @@ async function generateSubscription(client: Client): Promise<Subscription> {
             '-subj',
             '/CN=AWS IoT Certificate/O=Amazon',
         ])
+        if (!csr.includes('-----BEGIN CERTIFICATE REQUEST-----')) {
+            throw new Error(`openssl req produced unexpected output: ${csr.slice(0, 120)}`)
+        }
+        log(`dbg: CSR generated (${csr.split('\n').length} lines)`)
     } finally {
         try {
             unlinkSync(tmpKeyPath)
@@ -87,6 +92,7 @@ async function generateSubscription(client: Client): Promise<Subscription> {
     }
 
     const { thinq2Uri } = await client.gateway
+    log(`dbg: requesting certificate from LG (${thinq2Uri})`)
     const response = await apiFetch<CertificateResponse>(`${thinq2Uri}/service/users/client/certificate`, {
         headers: client.headers,
         method: 'POST',
@@ -94,8 +100,13 @@ async function generateSubscription(client: Client): Promise<Subscription> {
     })
     if (typeof response?.certificatePem !== 'string') throw new Error('Invalid certificate returned')
 
+    log(
+        `dbg: certificate received (${response.certificatePem.split('\n').length} lines), ${response.subscriptions.length} subscription topic(s)`,
+    )
+    for (const t of response.subscriptions) log(`dbg: topic: ${t}`)
+
     return {
-        key: privateKey,
+        key: privateKey as string,
         cert: response.certificatePem,
         subscriptions: response.subscriptions,
     }
@@ -103,6 +114,7 @@ async function generateSubscription(client: Client): Promise<Subscription> {
 
 async function openMQTT(client: Client, subscription: Subscription, opts: ConnectOptions): Promise<mqtt.MqttClient> {
     const log = opts.log ?? (() => {})
+
     const [route, { certificatePem: caCert }] = await Promise.all([
         apiFetch<RouteResponse>(`${IOT_BASE_URL}/route`, {
             headers: { 'x-country-code': client.env.countryCode, 'x-service-phase': 'OP', accept: 'application/json' },
@@ -113,32 +125,44 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
     ])
 
     const mqttUrl = route.mqttServer.replace(/^ssl:\/\//, 'mqtts://')
+
+    // clientId MUST be the userNo — the LG-provisioned IoT policy restricts iot:Connect
+    // to this exact value. Any suffix (even a stable one) will cause silent TCP close.
+    const clientId = client.clientId
+    log(`dbg: clientId=${clientId}`)
+    log(`dbg: broker=${mqttUrl}`)
+    log(`dbg: CA cert ${caCert.split('\n').length} lines`)
     log(`connecting to ${mqttUrl}`)
-    // Append a random suffix so this process gets its own AWS IoT slot and
-    // doesn't fight the LG ThinQ mobile app (or other tools) for the same clientId.
-    const clientId = (client.clientId || 'rethink') + '_' + randomBytes(4).toString('hex')
+
     const mqttClient = mqtt.connect(mqttUrl, {
         clientId,
         protocolVersion: 4,
         key: subscription.key,
         cert: subscription.cert,
         ca: caCert,
-        // Bypass CA verification so we can see whether TLS itself is the blocker.
-        // If pkt-send: connect appears with this set, the CA cert content is wrong.
-        rejectUnauthorized: false,
+        rejectUnauthorized: true,
         reconnectPeriod: 0,
     })
 
-    // mqtt.js v5 streamErrorHandler swallows TLS errors (only re-emits socket
-    // errors like ECONNREFUSED). Tap the internal stream directly — it is set
-    // synchronously by mqtt.connect() so this executes before any I/O.
-    ;(mqttClient as any).stream?.on('error', (err: Error) => log(`stream-err: ${err.message}`))
+    // mqtt.js 5.x defers _setupStream() via process.nextTick, so stream is undefined
+    // synchronously. Queue our error listener in nextTick too — it will run after
+    // _setupStream has set this.stream. Multiple listeners on the same event all fire,
+    // so this coexists with mqtt.js's own streamErrorHandler.
+    process.nextTick(() => {
+        const s = (mqttClient as any).stream
+        if (s) {
+            s.on('error', (err: Error) => log(`tls-err: ${(err as any).code ?? ''} ${err.message}`))
+        } else {
+            log('dbg: stream not yet available after nextTick — tls errors may be silent')
+        }
+    })
 
     mqttClient.on('connect', () => {
         log('connected')
         for (const topic of subscription.subscriptions) {
             mqttClient.subscribe(topic, { qos: 1 }, (err) => {
                 if (err) log(`subscribe error on ${topic}: ${err.message}`)
+                else log(`dbg: subscribed to ${topic}`)
             })
         }
     })
@@ -146,7 +170,6 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
     mqttClient.on('close', () => log('_close'))
     mqttClient.on('reconnect', () => log('_reconnect'))
     mqttClient.on('offline', () => log('_offline'))
-    // Packet-level trace to see if CONNACK arrives before the connection drops.
     mqttClient.on('packetsend', (p: any) => log(`pkt-send: ${p.cmd}`))
     mqttClient.on('packetreceive', (p: any) =>
         log(`pkt-recv: ${p.cmd}${p.returnCode != null ? ' rc=' + p.returnCode : ''}`),
@@ -196,10 +219,11 @@ export async function login(): Promise<State> {
 // Generate a fresh AWS IoT subscription (RSA key + LG-signed cert + topic list).
 // Separated from connect() so callers can cache and reuse the subscription across
 // reconnects — LG rate-limits certificate generation (error 9006).
-export async function createSubscription(state: State): Promise<Subscription> {
+export async function createSubscription(state: State, log?: (m: string) => void): Promise<Subscription> {
+    const noop = log ?? (() => {})
     const client = new Client({ countryCode: state.countryCode })
     await client.auth(state.refreshToken)
-    return generateSubscription(client)
+    return generateSubscription(client, noop)
 }
 
 // Open an MQTT connection using a pre-existing subscription. Re-auths to get a
@@ -219,6 +243,9 @@ export async function connectWithSubscription(
 // opts.onMessage. Generates a new subscription on every call — use createSubscription +
 // connectWithSubscription directly when you need to reuse a cached cert.
 export async function connect(state: State, opts: ConnectOptions): Promise<mqtt.MqttClient> {
-    const subscription = await createSubscription(state)
-    return connectWithSubscription(state, subscription, opts)
+    const log = opts.log ?? (() => {})
+    const client = new Client({ countryCode: state.countryCode })
+    await client.auth(state.refreshToken)
+    const subscription = await generateSubscription(client, log)
+    return openMQTT(client, subscription, opts)
 }
