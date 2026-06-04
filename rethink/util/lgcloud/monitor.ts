@@ -116,14 +116,18 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
         protocolVersion: 4,
         key: subscription.key,
         cert: subscription.cert,
-        // Alpine containers lack Amazon Root CA 1 in their system store. Provide
-        // the CA cert fetched from LG's route endpoint so TLS can verify the broker.
         ca: caCert,
+        // Bypass CA verification so we can see whether TLS itself is the blocker.
+        // If pkt-send: connect appears with this set, the CA cert content is wrong.
+        rejectUnauthorized: false,
         reconnectPeriod: 0,
     })
 
-    // mqtt.js v5 swallows TLS errors (only re-emits ECONNREFUSED/ECONNRESET/etc).
-    // Surface them by listening directly on the underlying socket.
+    // mqtt.js v5 streamErrorHandler swallows TLS errors (only re-emits socket
+    // errors like ECONNREFUSED). Tap the internal stream directly — it is set
+    // synchronously by mqtt.connect() so this executes before any I/O.
+    ;(mqttClient as any).stream?.on('error', (err: Error) => log(`stream-err: ${err.message}`))
+
     mqttClient.on('connect', () => {
         log('connected')
         for (const topic of subscription.subscriptions) {
@@ -136,10 +140,6 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
     mqttClient.on('close', () => log('_close'))
     mqttClient.on('reconnect', () => log('_reconnect'))
     mqttClient.on('offline', () => log('_offline'))
-    // Catch TLS errors that mqtt.js swallows (non-socket error codes go to noop).
-    ;(mqttClient as any).on('socket', (socket: any) => {
-        socket?.on('error', (err: Error) => log(`tls: ${err.message}`))
-    })
     // Packet-level trace to see if CONNACK arrives before the connection drops.
     mqttClient.on('packetsend', (p: any) => log(`pkt-send: ${p.cmd}`))
     mqttClient.on('packetreceive', (p: any) =>
