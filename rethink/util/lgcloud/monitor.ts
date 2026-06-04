@@ -175,11 +175,32 @@ export async function login(): Promise<State> {
     return { countryCode, refreshToken }
 }
 
-// Non-interactive: connect to the cloud MQTT feed using a State, deliver each message to
-// opts.onMessage.
-export async function connect(state: State, opts: ConnectOptions): Promise<mqtt.MqttClient> {
+// Generate a fresh AWS IoT subscription (RSA key + LG-signed cert + topic list).
+// Separated from connect() so callers can cache and reuse the subscription across
+// reconnects — LG rate-limits certificate generation (error 9006).
+export async function createSubscription(state: State): Promise<Subscription> {
     const client = new Client({ countryCode: state.countryCode })
     await client.auth(state.refreshToken)
-    const subscription = await generateSubscription(client)
+    return generateSubscription(client)
+}
+
+// Open an MQTT connection using a pre-existing subscription. Re-auths to get a
+// fresh access token (needed for the MQTT route API call) but does NOT regenerate
+// the certificate.
+export async function connectWithSubscription(
+    state: State,
+    subscription: Subscription,
+    opts: ConnectOptions,
+): Promise<mqtt.MqttClient> {
+    const client = new Client({ countryCode: state.countryCode })
+    await client.auth(state.refreshToken)
     return openMQTT(client, subscription, opts)
+}
+
+// Non-interactive: connect to the cloud MQTT feed using a State, deliver each message to
+// opts.onMessage. Generates a new subscription on every call — use createSubscription +
+// connectWithSubscription directly when you need to reuse a cached cert.
+export async function connect(state: State, opts: ConnectOptions): Promise<mqtt.MqttClient> {
+    const subscription = await createSubscription(state)
+    return connectWithSubscription(state, subscription, opts)
 }

@@ -10,7 +10,7 @@ import { Bridge } from '@/bridge'
 import { Request, Response } from 'express'
 import { Device as T1Device } from '@/cloud/thinq1/device'
 import { Device as T2Device } from '@/cloud/thinq2/device'
-import { connect } from '@/util/lgcloud/monitor'
+import { createSubscription, connectWithSubscription, type Subscription } from '@/util/lgcloud/monitor'
 import { loadState, saveState } from '@/util/lgcloud/state'
 import { Client, signInUrl } from '@/bridge/thinqApi'
 import * as OAuth2 from '@/bridge/oauth2'
@@ -255,6 +255,7 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
     // started so subsequent connections don't need to re-run the slow openssl /
     // certificate API round-trip. All browser subscribers share one feed.
     let cloudMqtt: MqttClient | undefined
+    let cloudSubscription: Subscription | undefined
     let cloudConnecting = false
     let cloudSubscribers: ExtendedWebSocket[] = []
 
@@ -267,6 +268,25 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
         })
     }
 
+    const cloudOpts = () => ({
+        onMessage: (msg: object) => broadcastCloud({ cloud: msg }),
+        log: (m: string) => {
+            log('CLOUD', m)
+            if (m === '_close') {
+                broadcastCloud({ cloudStatus: 'reconnecting' })
+                cloudMqtt = undefined
+                setTimeout(ensureCloudConnected, 5000)
+                return
+            }
+            if (m === '_offline') return
+            if (m === 'connected') {
+                broadcastCloud({ cloudStatus: 'connected' })
+                return
+            }
+            broadcastCloud({ cloudStatus: m })
+        },
+    })
+
     async function ensureCloudConnected() {
         if (cloudMqtt || cloudConnecting) return
         cloudConnecting = true
@@ -277,35 +297,21 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 broadcastCloud({ cloudStatus: 'not-logged-in' })
                 return
             }
-            cloudMqtt = await connect(state, {
-                onMessage: (msg) => broadcastCloud({ cloud: msg }),
-                log: (m) => {
-                    log('CLOUD', m)
-                    // Internal lifecycle events: log server-side only.
-                    if (m === '_close') {
-                        broadcastCloud({ cloudStatus: 'reconnecting' })
-                        // Discard the closed client so ensureCloudConnected() will
-                        // call connect() fresh — LG issues single-use certificates
-                        // so mqtt.js built-in reconnect (same cert) always fails.
-                        cloudMqtt = undefined
-                        setTimeout(ensureCloudConnected, 5000)
-                        return
-                    }
-                    if (m === '_offline') {
-                        return
-                    }
-                    if (m === 'connected') {
-                        broadcastCloud({ cloudStatus: 'connected' })
-                        return
-                    }
-                    broadcastCloud({ cloudStatus: m })
-                },
-            })
-            // Do NOT broadcast 'connected' here — openMQTT returns the client before
-            // the TCP/MQTT handshake completes. The 'connected' MQTT event above handles it.
+            // Reuse cached subscription (cert/key) to avoid hitting LG's cert
+            // generation rate limit (error 9006). Only regenerate when explicitly
+            // cleared (e.g. after a cert-rejection error).
+            if (!cloudSubscription) {
+                broadcastCloud({ cloudStatus: 'generating certificate…' })
+                cloudSubscription = await createSubscription(state)
+            }
+            cloudMqtt = await connectWithSubscription(state, cloudSubscription, cloudOpts())
         } catch (err) {
             log('CLOUD', `connection failed: ${err}`)
             broadcastCloud({ cloudStatus: `error: ${err}` })
+            // If the cert was rejected, clear it so the next attempt regenerates.
+            if (`${err}`.includes('9006') || `${err}`.toLowerCase().includes('certificate')) {
+                cloudSubscription = undefined
+            }
         } finally {
             cloudConnecting = false
         }
