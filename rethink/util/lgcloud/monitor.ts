@@ -23,7 +23,7 @@ import { randomBytes } from 'node:crypto'
 import mqtt from 'mqtt'
 import * as OAuth2 from '@/bridge/oauth2'
 import { subprocess } from '@/bridge/util'
-import { Client, IOT_BASE_URL, RouteResponse, apiFetch, signInUrl } from '@/bridge/thinqApi'
+import { Client, IOT_BASE_URL, RouteCertResponse, RouteResponse, apiFetch, signInUrl } from '@/bridge/thinqApi'
 
 export type Subscription = { key: string; cert: string; subscriptions: string[] }
 export type State = { countryCode: string; refreshToken: string }
@@ -97,9 +97,14 @@ async function generateSubscription(client: Client): Promise<Subscription> {
 
 async function openMQTT(client: Client, subscription: Subscription, opts: ConnectOptions): Promise<mqtt.MqttClient> {
     const log = opts.log ?? (() => {})
-    const route = await apiFetch<RouteResponse>(`${IOT_BASE_URL}/route`, {
-        headers: { 'x-country-code': client.env.countryCode, 'x-service-phase': 'OP', accept: 'application/json' },
-    })
+    const [route, { certificatePem: caCert }] = await Promise.all([
+        apiFetch<RouteResponse>(`${IOT_BASE_URL}/route`, {
+            headers: { 'x-country-code': client.env.countryCode, 'x-service-phase': 'OP', accept: 'application/json' },
+        }),
+        apiFetch<RouteCertResponse>(`${IOT_BASE_URL}/route/certificate?name=aws-iot`, {
+            headers: { accept: 'application/json' },
+        }),
+    ])
 
     const mqttUrl = route.mqttServer.replace(/^ssl:\/\//, 'mqtts://')
     log(`connecting to ${mqttUrl}`)
@@ -111,9 +116,9 @@ async function openMQTT(client: Client, subscription: Subscription, opts: Connec
         protocolVersion: 4,
         key: subscription.key,
         cert: subscription.cert,
-        // Do NOT supply a custom ca — the LG /route/certificate endpoint returns a
-        // dev-environment CA that does not match the production MQTT broker. Use
-        // Node's system trust store instead (which contains Amazon Root CA 1).
+        // Alpine containers lack Amazon Root CA 1 in their system store. Provide
+        // the CA cert fetched from LG's route endpoint so TLS can verify the broker.
+        ca: caCert,
         reconnectPeriod: 0,
     })
 
