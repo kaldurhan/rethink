@@ -205,24 +205,84 @@ function connectCloud() {
     }
 }
 
-// True when the only fields in data.state.reported are online/ospStandBy —
-// these are keepalive pings from the LG broker, not device state changes.
+// Reported-level fields that are always noise regardless of content.
+const REPORTED_NOISE = new Set(['meta', 'static', 'mid', 'timestamp', 'fwUpgradeInfo'])
+
+// washerDryer sub-fields that are static device config or irrelevant for cycle analysis.
+const WASHER_NOISE = new Set([
+    'PANEL_COURSE_LIST',
+    'panelCrsList',
+    'MY_COURE_LIST',
+    'downCrsList', // course lists (verbose, in binary too)
+    'applyBuzzer',
+    'buzzer',
+    'endMelody',
+    'audibleSDS', // sound preferences
+    'wifiSDS',
+    'isBlePairing',
+    'speechRecognitionMode',
+    'voiceState', // connectivity / voice
+    'currentDateDisplay',
+    'currentDisplay_12_24',
+    'currentTimeDisplay',
+    'initLCD', // clock display config
+    'masterCard',
+    'protocolVersion',
+    'ctrCmdAvail', // static device metadata
+    'smartCare_onOff',
+    'smartGridEnable', // smart features
+    'applyLaundryCollection',
+    'applyRemoteMaintain',
+    'remoteMaintain',
+    'laundryCare', // remote/collection
+    'noti3MinEnd',
+    'noti_OverSudsing', // notification flags
+    'autoCourseArrange',
+    'autoDetection',
+    'dnnReady',
+    'AIDDLed', // AI / auto config
+    'washingIndex', // duplicate of dnn_washingIndex
+    'activeStandbyEnable',
+    'baseDownloadCourseData',
+    'downloadCourse', // always-static settings
+    'ezCSDetergentSetVal',
+    'ezCSSoftenerSetVal',
+    'ezDispenseNotation', // dispenser config
+    'rinseDefault',
+    'washLoadDisplay', // display flags
+])
+
+function isWasherNoise(key) {
+    return key.startsWith('dnn_') || WASHER_NOISE.has(key)
+}
+
+// True when data.state.reported carries no useful cycle state.
+// Catches: ospStandBy pings, dnn_ weather-only messages, course-list blobs, fwUpgradeInfo.
 function isHeartbeat(payload) {
     const reported = payload?.data?.state?.reported
     if (!reported || typeof reported !== 'object') return false
-    return Object.keys(reported).every((k) => k === 'online' || k === 'ospStandBy')
+    const topKeys = Object.keys(reported).filter((k) => k !== 'online' && !REPORTED_NOISE.has(k))
+    if (topKeys.length === 0) return true
+    if (topKeys.length === 1 && topKeys[0] === 'ospStandBy') return true
+    if (topKeys.length === 1 && topKeys[0] === 'washerDryer') {
+        const wd = reported.washerDryer
+        return typeof wd === 'object' && Object.keys(wd).every(isWasherNoise)
+    }
+    return false
 }
 
-// Strip known-noisy ThinQ cloud shadow metadata fields before display.
-// Keeps all actual device state; removes fields that never carry useful info.
+// Strip noise from data.state.reported before display.
+// Removes static config fields from washerDryer, cutting the full state dump ~in half.
 function cleanPayload(payload) {
     const reported = payload?.data?.state?.reported
     if (!reported || typeof reported !== 'object') return payload
     const cleaned = { ...reported }
-    delete cleaned.meta
-    delete cleaned.static
-    delete cleaned.mid
-    delete cleaned.timestamp
+    for (const k of REPORTED_NOISE) delete cleaned[k]
+    if (cleaned.washerDryer && typeof cleaned.washerDryer === 'object') {
+        const wd = Object.fromEntries(Object.entries(cleaned.washerDryer).filter(([k]) => !isWasherNoise(k)))
+        if (Object.keys(wd).length > 0) cleaned.washerDryer = wd
+        else delete cleaned.washerDryer
+    }
     return { ...payload, data: { ...payload.data, state: { ...payload.data.state, reported: cleaned } } }
 }
 
