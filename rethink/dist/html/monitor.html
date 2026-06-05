@@ -171,6 +171,17 @@
                 align-items: center;
                 justify-content: space-between;
             }
+
+            /* ── Duplicate-count badge on binary messages ── */
+            .dup-count {
+                background: #ffcc00;
+                color: #333;
+                border-radius: 3px;
+                padding: 0 5px;
+                font-size: 0.8em;
+                font-weight: bold;
+                margin: 0 4px;
+            }
         </style>
         <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
         <link
@@ -292,6 +303,15 @@
                     <div class="panel-title-row" style="margin: 6px 0 4px">
                         <strong>Notifications</strong>
                         <div style="display: flex; gap: 16px; align-items: center">
+                            <label>
+                                Filter noise&nbsp;
+                                <span class="switch">
+                                    <label
+                                        >Off <input id="cloud_filter_noise" type="checkbox" checked />
+                                        <span class="lever"></span>On</label
+                                    >
+                                </span>
+                            </label>
                             <label>
                                 Status log&nbsp;
                                 <span class="switch">

@@ -13,6 +13,8 @@ function get(id) {
 // ── Device MQTT panel ────────────────────────────────────────────────────────
 let deviceWs
 let deviceReconnectTimer
+let lastRxHex = null
+let lastRxDiv = null
 
 get('device_id').innerText = new URLSearchParams(window.location.search).get('id')
 get('device_status').innerText = 'Waiting for rethink connection...'
@@ -79,6 +81,23 @@ function connectDevice() {
 
 function pushDeviceMessage(direction, payload, injected) {
     const messages = get('messages')
+
+    // Collapse consecutive identical rx packets (retransmits) into one entry.
+    if (direction === 'rx' && !injected && payload === lastRxHex && lastRxDiv) {
+        let badge = lastRxDiv.querySelector('.dup-count')
+        const n = parseInt(badge ? badge.dataset.n : '1') + 1
+        if (!badge) {
+            badge = document.createElement('span')
+            badge.className = 'dup-count'
+            lastRxDiv.insertBefore(badge, lastRxDiv.querySelector('.timestamp'))
+        }
+        badge.dataset.n = n
+        badge.textContent = `\xd7${n}`
+        lastRxDiv.querySelector('.timestamp').innerText = new Date().toLocaleTimeString()
+        if (get('autoscroll').checked) messages.scrollTop = messages.scrollHeight
+        return lastRxDiv
+    }
+
     const div = document.createElement('div')
     div.classList.add(direction, 'message')
     if (injected) div.classList.add('injected')
@@ -88,6 +107,13 @@ function pushDeviceMessage(direction, payload, injected) {
     timestamp.innerText = new Date().toLocaleTimeString()
     timestamp.classList.add('timestamp')
     div.appendChild(timestamp)
+
+    // Only update tracking on genuine rx packets; tx/injected don't break dedup.
+    // This handles the rx,tx,rx,tx,rx retransmit pattern correctly.
+    if (direction === 'rx' && !injected) {
+        lastRxHex = payload
+        lastRxDiv = div
+    }
 
     messages.appendChild(div)
     if (get('autoscroll').checked) messages.scrollTop = messages.scrollHeight
@@ -179,6 +205,14 @@ function connectCloud() {
     }
 }
 
+// True when the only fields in data.state.reported are online/ospStandBy —
+// these are keepalive pings from the LG broker, not device state changes.
+function isHeartbeat(payload) {
+    const reported = payload?.data?.state?.reported
+    if (!reported || typeof reported !== 'object') return false
+    return Object.keys(reported).every((k) => k === 'online' || k === 'ospStandBy')
+}
+
 // Strip known-noisy ThinQ cloud shadow metadata fields before display.
 // Keeps all actual device state; removes fields that never carry useful info.
 function cleanPayload(payload) {
@@ -193,6 +227,8 @@ function cleanPayload(payload) {
 }
 
 function pushCloudMessage(msg) {
+    if (isHeartbeat(msg.payload) && get('cloud_filter_noise').checked) return
+
     const feed = get('cloud_messages')
 
     const wrapper = document.createElement('div')
