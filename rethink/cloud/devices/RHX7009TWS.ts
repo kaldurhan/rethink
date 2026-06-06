@@ -42,9 +42,13 @@ const PHASES: Record<number, string> = {
     0x0503: 'Idle',
     0x0309: 'Heating',
     0x0307: 'Heating', // transient variant seen immediately after resume
+    0x0100: 'Startup', // brief init phase at cycle start (~8 s before heating begins)
     0x0701: 'Drying',
     0x0703: 'Drying', // transient variant seen immediately after resume
     0x0710: 'Cooldown',
+    0x0711: 'Cooldown', // sustained cooldown-tumble (cool air, no heat) — dominant end-of-drying phase
+    0x1100: 'Finishing', // very brief transition at TR=2 just before drum stops
+    0x0811: 'Finishing', // final pre-anti-crease phase, TR=1, ~3 min
 }
 
 function decodePhase(phA: number, phB: number): string {

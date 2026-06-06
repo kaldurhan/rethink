@@ -210,19 +210,46 @@ const REPORTED_NOISE = new Set(['meta', 'static', 'mid', 'timestamp', 'fwUpgrade
 
 // washerDryer sub-fields that are static device config or irrelevant for cycle analysis.
 const WASHER_NOISE = new Set([
-    'PANEL_COURSE_LIST', 'panelCrsList', 'MY_COURE_LIST', 'downCrsList', // course lists (verbose, in binary too)
-    'applyBuzzer', 'buzzer', 'endMelody', 'audibleSDS',                  // sound preferences
-    'wifiSDS', 'isBlePairing', 'speechRecognitionMode', 'voiceState',    // connectivity / voice
-    'currentDateDisplay', 'currentDisplay_12_24', 'currentTimeDisplay', 'initLCD', // clock display config
-    'masterCard', 'protocolVersion', 'ctrCmdAvail',                       // static device metadata
-    'smartCare_onOff', 'smartGridEnable',                                 // smart features
-    'applyLaundryCollection', 'applyRemoteMaintain', 'remoteMaintain', 'laundryCare', // remote/collection
-    'noti3MinEnd', 'noti_OverSudsing',                                    // notification flags
-    'autoCourseArrange', 'autoDetection', 'dnnReady', 'AIDDLed',         // AI / auto config
-    'washingIndex',                                                        // duplicate of dnn_washingIndex
-    'activeStandbyEnable', 'baseDownloadCourseData', 'downloadCourse',    // always-static settings
-    'ezCSDetergentSetVal', 'ezCSSoftenerSetVal', 'ezDispenseNotation',    // dispenser config
-    'rinseDefault', 'washLoadDisplay',                                     // display flags
+    'PANEL_COURSE_LIST',
+    'panelCrsList',
+    'MY_COURE_LIST',
+    'downCrsList', // course lists (verbose, in binary too)
+    'applyBuzzer',
+    'buzzer',
+    'endMelody',
+    'audibleSDS', // sound preferences
+    'wifiSDS',
+    'isBlePairing',
+    'speechRecognitionMode',
+    'voiceState', // connectivity / voice
+    'currentDateDisplay',
+    'currentDisplay_12_24',
+    'currentTimeDisplay',
+    'initLCD', // clock display config
+    'masterCard',
+    'protocolVersion',
+    'ctrCmdAvail', // static device metadata
+    'smartCare_onOff',
+    'smartGridEnable', // smart features
+    'applyLaundryCollection',
+    'applyRemoteMaintain',
+    'remoteMaintain',
+    'laundryCare', // remote/collection
+    'noti3MinEnd',
+    'noti_OverSudsing', // notification flags
+    'autoCourseArrange',
+    'autoDetection',
+    'dnnReady',
+    'AIDDLed', // AI / auto config
+    'washingIndex', // duplicate of dnn_washingIndex
+    'activeStandbyEnable',
+    'baseDownloadCourseData',
+    'downloadCourse', // always-static settings
+    'ezCSDetergentSetVal',
+    'ezCSSoftenerSetVal',
+    'ezDispenseNotation', // dispenser config
+    'rinseDefault',
+    'washLoadDisplay', // display flags
 ])
 
 function isWasherNoise(key) {

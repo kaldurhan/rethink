@@ -39,6 +39,27 @@ const PAUSED_INFO_CLASS = buf(
     'aaff300a00510093b20002010300160c1003050c010804ce030604000f0013040000000305010500255344485f58375f373030380000000000000000000102c08a7848060700000000000000000035edbb',
 )
 
+// Captured from real Mixed Fabrics cycle at 15:43:45 — TR=70 loaded, phA=01 phB=00.
+// Lasts ~8 s before heating starts (phase transitions to Drying immediately after).
+const STARTUP_TR70 = buf(
+    'aaff300a007800a466000100ec0066000000000006000000000000000100000000000406000000000000810500000000000000000000000000006400040078000000000503000006000000004600460100000200000406000000200000810500000000000000000000000000006400040078000000ae2ebb',
+)
+
+// Captured at 19:05:32 — first packet where phA=07 phB=11 (Cooldown phase begins at TR=10).
+// Cool-air tumble continues TR=10→3 (~17 min) before Finishing.
+const COOLDOWN_PHASE = buf(
+    'aaff300a007800acd3000100ec0066000503000006000000000b00461100000307670406000000000060810500000000000000000000000000006400040078000000000503000006000000000b004607110003076d040600000000004081050000000000000000000000000000640004007800000066cdbb',
+)
+
+// Captured at 19:22:52 (TR=2, phA=11 phB=00) then 19:22:53 (TR=1, phA=08 phB=11).
+// Both map to Finishing — brief end-of-cooldown states before anti-crease.
+const FINISHING_TR2 = buf(
+    'aaff300a007800ad7c000100ec0066000503000006000000000300460711000407f60406000000000040810500000000000000000000000000006400040078000000000503000006000000000200461100000507ff0406000000000060810500000000000000000000000000006400040078000000d850bb',
+)
+const FINISHING_TR1 = buf(
+    'aaff300a007800ad7e000100ec0066000503000006000000000200461100000507ff0406000000000060810500000000000000000000000000006400040078000000000503000006000000000100460811000508000406000000000060810500000000000000000000000000006400040078000000839ebb',
+)
+
 // Running packet with TR=0 in sub2 — the post-cycle anti-wrinkle tumble.
 // Captured at 12:38:35 immediately after the End packet.
 const POST_CYCLE_TUMBLE = buf(
@@ -146,6 +167,36 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DRYING_TR29)
         assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Drying')
+    })
+
+    test('startup phase (0x0100) TR=70 → run_state=Running, phase=Startup, remaining_time=70', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', STARTUP_TR70)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.run_state, 'Running')
+        assert.equal(p.phase, 'Startup')
+        assert.equal(p.remaining_time, 70)
+        assert.equal(p.program, 'Mixed Fabrics')
+    })
+
+    test('cooldown phase (0x0711) → run_state=Running, phase=Cooldown, remaining_time=11', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', COOLDOWN_PHASE)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.run_state, 'Running')
+        assert.equal(p.phase, 'Cooldown')
+        assert.equal(p.remaining_time, 11)
+        assert.equal(p.program, 'Mixed Fabrics')
+    })
+
+    test('finishing phases (0x1100 TR=2 then 0x0811 TR=1) → phase=Finishing', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', FINISHING_TR2)
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Finishing')
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 2)
+        thinq.emit('data', FINISHING_TR1)
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Finishing')
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 1)
     })
 
     test('info-class ST=0x03 (originally labelled COOLDOWN) → run_state=Paused, program/phase untouched', () => {

@@ -7,7 +7,7 @@
 - Repo: `kaldurhan/rethink` (private), branch `master`
 - Working dir: `/tmp/rethink/rethink`
 - Container image: `ghcr.io/kaldurhan/rethink`
-- Current released version: **1.0.36**
+- Current released version: **1.0.37**
 - Build: `npm run build` (tsc + tsc-alias + cp html → dist)
 - Release: `gh release create vX.Y.Z` triggers the GHCR publish workflow
 
@@ -335,6 +335,79 @@ INITIAL → DETECTING → DETERGENT_INPUT → RUNNING → RINSING → SPINNING �
 | `accumulatedEnergyData` | `{"sequenceNum":4,"power":581}`              | Running total Wh from cloud. Cross-reference with binary `courseSpendPower`.                                                |
 | `remainTimeMinute`      | integer                                      | Cloud mirrors the binary remaining time — binary source preferred (lower latency).                                          |
 | `initialTimeMinute`     | integer                                      | Total programmed cycle duration. Available from cloud at cycle start. Binary sub[15] is the same value (not yet published). |
+
+---
+
+## RHX7009TWS Dryer — Binary Protocol
+
+Device file: `cloud/devices/RHX7009TWS.ts`  
+Long packets: `byte2=0xff`, `inner[0]=0x30`.  
+Key offsets: `inner[3]`=type, `inner[10]`=ST, `inner[8]`=class (0x01=normal, 0x02=info).
+
+**Full cycle capture analysed 2026-06-06**: Mixed Fabrics, Turbo, VeryDry, 70 min, 15:43–19:26.
+
+### Packet types (dryer)
+
+| Type   | ST           | Count | Description                                                                                  |
+| ------ | ------------ | ----- | -------------------------------------------------------------------------------------------- |
+| `0x13` | 0x0b Standby | 1     | Short standby status                                                                         |
+| `0x78` | 0xec Running | 234   | Main status (double-block, 116 bytes) — one per minute while running                         |
+| `0x45` | 0xe2 / 0xeb  | —     | Short status (single-block, 65 bytes) — DisplayOn and AntiCrease                             |
+| `0x58` | 0x04 End     | 2     | End-of-cycle status (84 bytes)                                                               |
+| `0x51` | 0x03         | 25    | Info-class — fires during drying AND pause; info-class handler publishes Paused              |
+| `0x64` | 0x03         | 7     | Info-class — same pattern as 0x51; also fires mid-drying (~hourly)                           |
+| `0x82` | 0x03         | 2     | Info-class — boot/init burst                                                                 |
+| `0x59` | 0x03         | 1     | Info-class — single occurrence at end of cycle                                               |
+| `0xa4` | 0x03         | 2     | Info-class — pre-AntiCrease transition burst                                                 |
+| `0xb0` | 0x02         | 79    | Periodic sensor/energy data (~every 2.5 min) — ST=0x02 → silently dropped by current decoder |
+| `0x30` | 0x4d         | 3     | Course-list report — silently dropped                                                        |
+
+**Note on 0x51/0x64 mid-drying**: these info-class packets (inner[8]=0x02, ST=0x03) fire during normal drying as well as during pause. The decoder publishes Paused for both, but the next 0x78 Running packet (≤60 s later) corrects the state. Not worth distinguishing without more captures.
+
+### Double-block structure (0x78, 116 bytes)
+
+Footer signature at inner[56] or inner[57]: `64 00 04 00 78`. Sub2 start = footer_index + 8.
+
+- `sub2+5` = CS (course code)
+- `sub2+10` = TR (remaining minutes)
+- `sub2+13` = phA
+- `sub2+14` = phB
+
+### Phase codes (dryer)
+
+| phA  | phB  | Label      | When                                                                 |
+| ---- | ---- | ---------- | -------------------------------------------------------------------- |
+| 0x05 | 0x03 | Idle       | DisplayOn / idle browsing                                            |
+| 0x03 | 0x09 | Heating    | Initial heat-up on cycle start                                       |
+| 0x03 | 0x07 | Heating    | Transient variant (resume after pause)                               |
+| 0x01 | 0x00 | Startup    | TR=0→70 at cycle start (~8 s), before heating begins                 |
+| 0x07 | 0x01 | Drying     | Active drying (heat + tumble) — dominant phase (TR 69→11 in capture) |
+| 0x07 | 0x03 | Drying     | Transient variant (resume after pause)                               |
+| 0x07 | 0x10 | Cooldown   | Cooldown transition (previously confirmed; seldom seen)              |
+| 0x07 | 0x11 | Cooldown   | Sustained cool-air tumble (TR 10→3, ~17 min) — dominant cooldown     |
+| 0x11 | 0x00 | Finishing  | Very brief transition at TR=2                                        |
+| 0x08 | 0x11 | Finishing  | Final pre-anti-crease phase, TR=1, ~3 min                            |
+| 0x00 | 0x04 | (suppress) | TR=0 — suppressed by TR=0 rule; AntiCrease follows immediately       |
+
+### End-of-cycle sequence (confirmed 2026-06-06)
+
+```
+Running 0x78 Drying (07,01) TR=11..69 min
+→ Running 0x78 Cooldown (07,11) TR=3..10 min (~17 min total)
+→ Running 0x78 Finishing (11,00) TR=2
+→ Running 0x78 Finishing (08,11) TR=1 (~3 min)
+→ AntiCrease 0x45 (ST=0xe2) — [TR field=70, phase=Idle, not published]
+→ End 0x58 (ST=0x04)
+→ Running 0x78 TR=0 (00,04) → suppressed
+→ Standby 0x13 (ST=0x0b)
+```
+
+### Known gaps (dryer)
+
+- **0xb0 energy data**: 79 packets, ST=0x02, len=172 — not parsed. Cloud `periodicEnergyData` covers this (Wh per 15-min interval). Adding a `course_spend_power` sensor to the dryer would require decoding this type.
+- **0x51/0x64 Paused detection**: can't distinguish "mid-drying periodic" from "genuinely paused" from content alone. Spurious Paused publishes self-correct within 60 s.
+- **Initial cycle time**: `sub2+10` gives remaining minutes. A total-time field would enable % progress — not yet identified.
+- **Other courses**: only Mixed Fabrics observed in full-cycle capture. Course codes for Cotton, Delicates, etc. not yet verified against binary.
 
 ---
 
