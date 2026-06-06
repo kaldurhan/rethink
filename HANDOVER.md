@@ -7,7 +7,7 @@
 - Repo: `kaldurhan/rethink` (private), branch `master`
 - Working dir: `/tmp/rethink/rethink`
 - Container image: `ghcr.io/kaldurhan/rethink`
-- Current released version: **1.0.35**
+- Current released version: **1.0.36**
 - Build: `npm run build` (tsc + tsc-alias + cp html → dist)
 - Release: `gh release create vX.Y.Z` triggers the GHCR publish workflow
 
@@ -70,16 +70,18 @@ Every packet type is retransmitted 3× by the device. The broker ACKs some (0x17
 
 ### Newly discovered packet types (2026-06-06, Blandmaterial captures)
 
-Deep byte analysis from two captures: partial cycle (10:29, Blandmaterial) and near-full cycle (13:33–14:56, ~83 min).
+Deep byte analysis from three captures: partial cycle (10:29), near-full cycle (13:33–14:56, ~83 min), end-of-cycle (15:04–15:40).
 
 | Type   | ST     | Inner len | Status                                                              |
 | ------ | ------ | --------- | ------------------------------------------------------------------- |
 | `0x53` | `0x03` | 79        | **IMPLEMENTED** — motor ramp; drives SpinRamp when 0x76 silent >90s |
 | `0x67` | `0x03` | 99        | Partially decoded (per-minute rinse sampler)                        |
-| `0x88` | `0x03` | 132       | Partially decoded (rinse-cycle event)                               |
+| `0x80` | `0x03` | —         | Appears once at end-of-cycle (~15:37); purpose unknown, discarded   |
+| `0x88` | `0x03` | 132       | Partially decoded (rinse-cycle event); 4th burst seen at 15:26      |
 | `0x8a` | `0x02` | 134       | **IMPLEMENTED** — elapsed_time, phase_remaining_time, water_temp    |
 | `0x8e` | `0x03` | 138       | Confirmed: pure transition marker (discarded)                       |
 | `0x9e` | `0x03` | 154       | Undecodable without more captures                                   |
+| `0xa0` | `0x03` | —         | Appears once at end-of-cycle (~15:38); purpose unknown, discarded   |
 
 #### 0x53 — Motor ramp packet (IMPLEMENTED in v1.0.35)
 
@@ -129,14 +131,15 @@ Const header: `inner[12]=0x53, inner[13]=0x04, inner[14]=0x0e`.
 
 #### 0x76 — Full status (cycle active)
 
-**Sub-block phase decode from 83-min capture (confirmed):**
+**Sub-block phase decode — confirmed across three captures (10:29, 13:33–14:56, 15:04–15:40):**
 
-- Phase `0x0010` (Tumble) is the ONLY phase observed in 39 captured 0x76 packets
+- Phase `0x0010` (Tumble): observed throughout wash cycle (83-min capture), rem 60→22 min
+- 0x76 pauses during final drain+spin (~22 min gap); 0x53 covers spin detection in this window
+- Phase `0x0e0c` (RinseDrain): CONFIRMED at 15:26:33–15:37 in end-of-cycle capture, rem 12→1 min
+- Phase `0x100e` (Finished): CONFIRMED at 15:38:22–24 — appears as rinse-drain→end transition; then anti-crease Tumble resumes
 - `sub[4]` (course) = `0x2b` (Blandmaterial) throughout
-- `sub[3]` (spin) = `0x06` (400 RPM) throughout
-- `sub[13..14]` (remaining_time) counts down 60→22 min
-- 0x76 stops sending when machine enters final drain (last seen at rem=22); resumes never (spin handled by 0x53)
-- WashTumble (0x0b10), RinseFill (0x040e), RinseTumble (0x060e), RinseDrain (0x0c0e/0x0e0c), SpinActive (0x080e/0x0a0e) — NOT observed in this capture. Phase codes for these exist in the table but may not fire on this device model.
+- `sub[3]` (spin) = `0x06` (400 RPM) during tumble; varies during drain (0x27 observed)
+- WashTumble (0x0b10), RinseFill (0x040e), RinseTumble (0x060e), SpinActive (0x080e/0x0a0e) — not yet observed in any capture
 
 #### 0x67 — Per-minute rinse sampler
 
@@ -178,7 +181,7 @@ Otherwise `sub[13..14]` is remaining time (LE u16, minutes).
 
 Running packets (`0x76`) contain **two sub-blocks**: previous program + current program. Scanner picks the last one correctly.
 
-**Suppression rule**: if `inner[10] === 0xec` (Running) and `sub[1] === 0x00 && sub[2] === 0x00` → phase is Finished → this is anti-crease tumble → packet suppressed so `End` stays visible in HA.
+**Suppression rule** (v1.0.36): if `inner[10] === 0xec` (Running) and `decodePhase(sub[1], sub[2]) === 'Finished'` → suppress so End/AntiCrease stays visible in HA. Covers both 0x0000 (anti-crease tumble) and 0x100e (rinse→end transition, confirmed from end-of-cycle capture).
 
 ---
 
@@ -254,11 +257,15 @@ Exception: if the cached value is absent or is `'DisplayOn'` (stale retained mes
 
 2. **SpinActive never observed** — codes `0x080e`, `0x0a0e` not seen in any `0x76` sub-block across two captures. May not apply to this device; or may appear in a short window not yet captured. `0x53` covers all practical spin detection.
 
-3. **Full spin→End window not yet captured** — 83-min capture ends mid-spin (14:56). Still need:
-   - Final spin phase confirmation (ST=0xec and End transition)
-   - `End` packet structure when `0x8a` stops
-   - `courseSpendPower` final value at end of cycle
-   - `AntiCrease` packet sequence
+3. **End-of-cycle window confirmed** (15:04–15:40 capture, 2026-06-06). Findings:
+   - Final spin: 0x53 motor-ramp packets (0x12→0x1d steps) from ~15:12, first 0x76 Tumble resumes at 15:15
+   - RinseDrain (0x0e0c) in 0x76 confirmed 15:26–15:37, rem counts 12→1 min
+   - Finished (0x100e) in 0x76 confirmed 15:38:22–24 (rinse→end transition)
+   - End state (ST=0x04) in 0x58 packet confirmed 15:38:02–06
+   - AntiCrease (ST=0xe2) in 0x44 packet confirmed 15:38:08–14
+   - Post-End anti-crease: 0x76 Tumble resumes at 15:38:34+ (ST during anti-crease not confirmed — may be 0xec or 0xe2)
+   - New types 0x80 (15:37:56) and 0xa0 (15:38:16) appear at end; both ST=0x03 → silently discarded
+   - **Bug fixed (v1.0.36)**: suppress rule extended to phase-based check, covering both 0x0000 and 0x100e
 
 4. **Load level from binary** — `0x88` fires at each rinse start (3×/cycle), not at DETECTING. inner[13]=0x06 constant in both captures; no load-level byte identified. Need light vs heavy wash captures side-by-side.
 
@@ -315,7 +322,7 @@ Cloud message types seen:
 INITIAL → DETECTING → DETERGENT_INPUT → RUNNING → RINSING → SPINNING → END
 ```
 
-(Full progression confirmed from cloud feed; `SPINNING` and `END` binary packets not yet captured.)
+(Full progression confirmed from cloud feed and binary captures 2026-06-06.)
 
 ### Cloud fields of interest (not yet published to HA)
 

@@ -85,10 +85,13 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'SpinRamp')
     })
 
-    test('cycle_phase Finished maps from 0x100e', () => {
+    test('cycle_phase Finished (0x100e) with ST=Running is suppressed — same as 0x0000', () => {
+        // 0x100e appears at end-of-cycle rinse→drain transition (confirmed from capture).
+        // ST=Running + phase=Finished is always post-cycle — suppress so End stays visible.
         const { ha, thinq } = makeDevice()
         thinq.emit('data', synthFrame(0x10, 0x0e, 0x06, 0x2b, 0x00, 0x00))
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Finished')
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, undefined)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
     })
 
     test('cycle_phase unknown for unrecognized tuple', () => {
@@ -376,6 +379,23 @@ describe(MODEL_ID, () => {
         thinq.emit('data', END_OF_CYCLE)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
         thinq.emit('data', RUNNING_FINISHED)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.run_state, 'End')
+        assert.equal(p.cycle_phase, undefined)
+    })
+
+    // Running packet where last sub-block has phase=0x100e (Finished), confirmed from
+    // end-of-cycle capture at 15:38:22. Differs from RUNNING_FINISHED (0x0000) —
+    // appears at the rinse-drain→end transition rather than during anti-crease tumble.
+    const RUNNING_FINISHED_100E = buf(
+        'aaff200a0076000707000100ec006400000000062b000000000000000001005d0145002b0e0c00010000031c040101755a200000100104180000000000000400000000100e062b000000000000000001005d0146002b100e00010000031c040101755a20000010010418000000000000040000d822bb',
+    )
+
+    test('post-cycle Running packet (phA=0x10, phB=0x0e = 0x100e) is suppressed — End state preserved', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', END_OF_CYCLE)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
+        thinq.emit('data', RUNNING_FINISHED_100E)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'End')
         assert.equal(p.cycle_phase, undefined)

@@ -319,9 +319,9 @@ export default class Device extends AABBDevice {
         const subStart = inner.length >= 32 ? findStatusSubBlock(inner) : -1
         const sub = subStart >= 0 ? inner.subarray(subStart, subStart + 21) : null
 
-        // Post-cycle anti-crease tumble: ST=Running but phase=0x0000 (Finished).
-        // The drum keeps spinning after the cycle ends — suppress so End stays visible.
-        if (st === 0xec && sub && sub[1] === 0x00 && sub[2] === 0x00) return
+        // Post-cycle: ST=Running but phase=Finished (0x0000 or 0x100e both observed).
+        // Suppress so End/AntiCrease stays visible in HA.
+        if (st === 0xec && sub && decodePhase(sub[1], sub[2]) === 'Finished') return
 
         // DisplayOn is transient user-browsing; keep the last meaningful state visible.
         // Exception: empty cache or stale 'DisplayOn' retained value → publish Standby
