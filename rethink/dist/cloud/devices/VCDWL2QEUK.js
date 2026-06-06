@@ -218,14 +218,46 @@ export default class Device extends AABBDevice {
                     payload_on: 'open',
                     payload_off: 'closed',
                 },
+                water_temp: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-water_temp',
+                    state_topic: '$this/water_temp',
+                    name: 'Water temperature',
+                    icon: 'mdi:thermometer-water',
+                    unit_of_measurement: '°C',
+                    state_class: 'measurement',
+                    device_class: 'temperature',
+                },
+                elapsed_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-elapsed_time',
+                    state_topic: '$this/elapsed_time',
+                    name: 'Elapsed time',
+                    icon: 'mdi:timer-play-outline',
+                    unit_of_measurement: 'min',
+                    state_class: 'measurement',
+                },
+                phase_remaining_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-phase_remaining_time',
+                    state_topic: '$this/phase_remaining_time',
+                    name: 'Phase time remaining',
+                    icon: 'mdi:timer-outline',
+                    unit_of_measurement: 'min',
+                    state_class: 'measurement',
+                },
             },
         }));
     }
     processAABB(inner) {
         if (inner.length < 11 || inner[0] !== 0x20)
             return;
-        // 0x63 fires when door opens; 0x4c fires when door closes (both carry
-        // inner[10]=0x03 which is not in STATES_VCDWL — intercept before state check).
+        // Intercept typed packets before the state-table check.
+        // Door: 0x63 = open, 0x4c = close (ST=0x03, not in STATES_VCDWL).
+        // 0x8a: periodic snapshot (ST=0x02, not in STATES_VCDWL) — fires ~every 5 min.
+        //   inner[23] = elapsed minutes since door-lock (±2 min).
+        //   inner[25] = remaining minutes in current phase (wash or rinse).
+        //   inner[31] = water/drum temperature (°C), confirmed from Blandmaterial capture.
         const packetType = inner[3];
         if (packetType === 0x63) {
             this.publishProperty('door', 'open');
@@ -233,6 +265,14 @@ export default class Device extends AABBDevice {
         }
         if (packetType === 0x4c) {
             this.publishProperty('door', 'closed');
+            return;
+        }
+        if (packetType === 0x8a) {
+            if (inner.length >= 32) {
+                this.publishProperty('elapsed_time', inner[23]);
+                this.publishProperty('phase_remaining_time', inner[25]);
+                this.publishProperty('water_temp', inner[31]);
+            }
             return;
         }
         const st = inner[10];

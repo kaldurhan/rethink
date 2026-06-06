@@ -102,7 +102,17 @@ describe(MODEL_ID, () => {
         const cfg = ha.devices[DEVICE_ID].config
         assert.ok(cfg, 'config published')
         const components = cfg!.components as Record<string, Record<string, unknown>>
-        for (const c of ['run_state', 'cycle_phase', 'course', 'temp', 'spin', 'remaining_time']) {
+        for (const c of [
+            'run_state',
+            'cycle_phase',
+            'course',
+            'temp',
+            'spin',
+            'remaining_time',
+            'water_temp',
+            'elapsed_time',
+            'phase_remaining_time',
+        ]) {
             assert.ok(components[c], `component ${c} present`)
         }
         // run_state enum includes the published states (DisplayOn is filtered).
@@ -119,9 +129,12 @@ describe(MODEL_ID, () => {
         assert.ok(cpOptions.includes('Tumble'))
         assert.ok(cpOptions.includes('Drain'))
         assert.ok(cpOptions.includes('Finished'))
-        // spin uses rpm; remaining_time uses min.
+        // spin uses rpm; time sensors use min; water_temp uses °C.
         assert.equal(components.spin.unit_of_measurement, 'rpm')
         assert.equal(components.remaining_time.unit_of_measurement, 'min')
+        assert.equal(components.elapsed_time.unit_of_measurement, 'min')
+        assert.equal(components.phase_remaining_time.unit_of_measurement, 'min')
+        assert.equal(components.water_temp.unit_of_measurement, '°C')
     })
 
     // Real captured packet from active Turbowash 39 cycle (1 minute in).
@@ -366,6 +379,35 @@ describe(MODEL_ID, () => {
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'End')
         assert.equal(p.cycle_phase, undefined)
+    })
+
+    // 0x8a periodic snapshot: inner[23]=elapsed_time, inner[25]=phase_remaining_time,
+    // inner[31]=water_temp. ST=0x02 is not in STATES_VCDWL — packet must be handled
+    // via type-check before the state table, same as door packets.
+    //
+    // Frame breakdown (40 bytes total):
+    //   aa ff — AABB header (byte2=ff → long packet)
+    //   inner[0..35] — 36 bytes processed by processAABB:
+    //     [0]=20 [3]=8a [10]=02(ST) [23]=28(elapsed=40) [25]=0e(remain=14) [31]=2d(temp=45°C)
+    //   00 bb — dummy checksum + framing
+    const PERIODIC_8A = buf('aaff200a008a00151c00020102004f0e0102000000008d0b0028010e00000000012d2d2d2d2d00bb')
+
+    test('0x8a periodic snapshot publishes elapsed_time, phase_remaining_time, water_temp', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', PERIODIC_8A)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.elapsed_time, 0x28, 'elapsed_time = 40 min')
+        assert.equal(p.phase_remaining_time, 0x0e, 'phase_remaining_time = 14 min')
+        assert.equal(p.water_temp, 0x2d, 'water_temp = 45°C')
+    })
+
+    test('0x8a does not affect run_state or cycle_phase (intercepted before state check)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        thinq.emit('data', PERIODIC_8A)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Idle')
     })
 
     test('setProperty is a no-op (sensors-only v1)', () => {
