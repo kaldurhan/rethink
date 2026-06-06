@@ -410,6 +410,39 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Idle')
     })
 
+    // Real captured 0x53 motor-ramp packet from 13:39:01 (rinse-tumble start).
+    // inner[12]=0x18 (motor active), inner[13]=0x12 (speed step). ST=0x03 (not in
+    // STATES_VCDWL) — must be intercepted before state check, same as 0x8a.
+    const MOTOR_RAMP_53 = buf(
+        'aaff200a0053001a83000201030018120e01021200dd00f50c00360000000000000000000000000001050025564344574c325145554b0000000000000000000000000102c0220b8b010700000000000000000000c500bb',
+    )
+
+    test('0x53 publishes SpinRamp when no 0x76 seen yet (cold-start / final spin)', () => {
+        const { ha, thinq, dev } = makeDevice()
+        // lastTumbleTime=0 by default → >90s since last tumble → SpinRamp fires.
+        assert.equal(dev.lastTumbleTime, 0)
+        thinq.emit('data', MOTOR_RAMP_53)
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'SpinRamp')
+    })
+
+    test('0x53 is suppressed when 0x76 was recent (<90 s)', () => {
+        const { ha, thinq, dev } = makeDevice()
+        // Simulate a recent 0x76 sub-block decode by setting lastTumbleTime to now.
+        dev.lastTumbleTime = Date.now()
+        thinq.emit('data', MOTOR_RAMP_53)
+        // cycle_phase must remain unpublished (not overridden by 0x53 SpinRamp).
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, undefined)
+    })
+
+    test('0x53 does not affect run_state or other sensors', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        const runState = ha.devices[DEVICE_ID].properties.run_state
+        thinq.emit('data', MOTOR_RAMP_53)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, runState)
+        assert.equal(ha.devices[DEVICE_ID].properties.elapsed_time, undefined)
+    })
+
     test('setProperty is a no-op (sensors-only v1)', () => {
         const { thinq, dev } = makeDevice()
         thinq.resetRecorder()

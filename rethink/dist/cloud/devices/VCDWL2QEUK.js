@@ -126,6 +126,11 @@ function findStatusSubBlock(inner) {
 export default class Device extends AABBDevice {
     constructor(HA, thinq, meta) {
         super(HA, thinq);
+        // Timestamp of the last 0x76 sub-block decode. Used to gate 0x53 SpinRamp
+        // publishes: during active tumble, 0x76 fires every ~60s so this stays fresh;
+        // during the final drain+spin, no 0x76 arrives for 15+ min so 0x53 is allowed
+        // to update cycle_phase to SpinRamp.
+        this.lastTumbleTime = 0;
         const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown'];
         const phaseOptions = [
             'Idle',
@@ -275,6 +280,21 @@ export default class Device extends AABBDevice {
             }
             return;
         }
+        // 0x53: motor-controller ramp packet. inner[12]=0x18 (motor active),
+        // inner[13]=speed step 0x12..0x1f. Fires concurrently with 0x76 during
+        // tumble AND exclusively during the final drain+spin (0x76 absent for 15+
+        // min). Only publish SpinRamp when 0x76 has been silent for >90 s so we
+        // don't override the Tumble phase during gentle agitation.
+        if (packetType === 0x53) {
+            if (inner.length >= 14 &&
+                inner[12] === 0x18 &&
+                inner[13] >= 0x12 &&
+                inner[13] <= 0x1f &&
+                Date.now() - this.lastTumbleTime > 90000) {
+                this.publishProperty('cycle_phase', 'SpinRamp');
+            }
+            return;
+        }
         const st = inner[10];
         const stateLabel = STATES_VCDWL[st];
         // Unknown ST bytes (e.g. 0x4d telemetry bursts) — suppress rather than
@@ -302,6 +322,7 @@ export default class Device extends AABBDevice {
             return;
         const phase = decodePhase(sub[1], sub[2]);
         this.publishProperty('cycle_phase', phase);
+        this.lastTumbleTime = Date.now();
         const sp = sub[3];
         this.publishProperty('spin', SPINS_VCDWL[sp] ?? 0);
         const cs = sub[4];
