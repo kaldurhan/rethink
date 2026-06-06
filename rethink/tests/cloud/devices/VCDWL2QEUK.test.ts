@@ -401,6 +401,22 @@ describe(MODEL_ID, () => {
         assert.equal(p.cycle_phase, undefined)
     })
 
+    test('End state publishes remaining_time=0 (so done-timeout fires after 30 min)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 55, 'pre-condition: remaining non-zero')
+        thinq.emit('data', END_OF_CYCLE)
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 0)
+    })
+
+    test('AntiCrease state publishes remaining_time=0', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 55, 'pre-condition: remaining non-zero')
+        thinq.emit('data', ANTI_CREASE_END)
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 0)
+    })
+
     // 0x8a periodic snapshot: inner[23]=elapsed_time, inner[25]=phase_remaining_time,
     // inner[31]=water_temp. ST=0x02 is not in STATES_VCDWL — packet must be handled
     // via type-check before the state table, same as door packets.

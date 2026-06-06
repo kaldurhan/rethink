@@ -333,6 +333,10 @@ export default class Device extends AABBDevice {
             if (!cached || cached === 'DisplayOn') this.publishProperty('run_state', 'Standby')
         }
 
+        if (st === 0x04 || st === 0xe2) {
+            this.publishProperty('remaining_time', 0)
+        }
+
         if (!sub) return
 
         const phase = decodePhase(sub[1], sub[2])
@@ -351,7 +355,7 @@ export default class Device extends AABBDevice {
         const subMarker = inner[subStart]
         if (subMarker === 0x05 && sub[20] === 0x01 && phase === 'Idle') {
             this.publishProperty('temp', TEMPERATURES_VCDWL[sub[13]] ?? 'unknown')
-        } else {
+        } else if (st === 0xec) {
             const remaining = sub[13] | (sub[14] << 8)
             this.publishProperty('remaining_time', remaining)
         }
