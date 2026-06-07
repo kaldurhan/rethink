@@ -45,6 +45,7 @@ const SPINS_VCDWL = {
 // per phase per the wiki notes.
 const PHASES_VCDWL = {
     0x0000: 'Finished', // post-cycle Running packets: phA=0x00, phB=0x00
+    0x0210: 'Idle', // 20-30°C settled (scroll series: 0x0110→0x0210→0x0310→0x0510)
     0x0310: 'Idle',
     0x0510: 'Idle',
     0x0810: 'Idle',
@@ -131,6 +132,9 @@ export default class Device extends AABBDevice {
         // during the final drain+spin, no 0x76 arrives for 15+ min so 0x53 is allowed
         // to update cycle_phase to SpinRamp.
         this.lastTumbleTime = 0;
+        // Count of intermediate spin-ramp events seen in the current cycle.
+        // 0 = still in wash phase; ≥1 = rinse phase has begun.
+        this.spinRampsSeen = 0;
         const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown'];
         const phaseOptions = [
             'Idle',
@@ -251,6 +255,15 @@ export default class Device extends AABBDevice {
                     unit_of_measurement: 'min',
                     state_class: 'measurement',
                 },
+                stage: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-stage',
+                    state_topic: '$this/stage',
+                    name: 'Stage',
+                    icon: 'mdi:washing-machine',
+                    device_class: 'enum',
+                    options: ['Off', 'Washing', 'Rinsing', 'Spinning', 'Done'],
+                },
             },
         }));
     }
@@ -286,12 +299,24 @@ export default class Device extends AABBDevice {
         // min). Only publish SpinRamp when 0x76 has been silent for >90 s so we
         // don't override the Tumble phase during gentle agitation.
         if (packetType === 0x53) {
-            if (inner.length >= 14 &&
+            const isActiveSpin = inner.length >= 14 &&
                 inner[12] === 0x18 &&
                 inner[13] >= 0x12 &&
-                inner[13] <= 0x1f &&
-                Date.now() - this.lastTumbleTime > 90000) {
-                this.publishProperty('cycle_phase', 'SpinRamp');
+                inner[13] <= 0x1f;
+            if (isActiveSpin) {
+                const isFinalSpin = Date.now() - this.lastTumbleTime > 90000;
+                if (isFinalSpin) {
+                    this.publishProperty('cycle_phase', 'SpinRamp');
+                    this.publishProperty('stage', 'Spinning');
+                }
+                else {
+                    // Intermediate spin ramp during wash/rinse tumble
+                    this.spinRampsSeen++;
+                    if (this.spinRampsSeen === 1) {
+                        // First spin ramp marks end of wash — rinse phase has begun
+                        this.publishProperty('stage', 'Rinsing');
+                    }
+                }
             }
             return;
         }
@@ -318,11 +343,23 @@ export default class Device extends AABBDevice {
             if (!cached || cached === 'DisplayOn')
                 this.publishProperty('run_state', 'Standby');
         }
+        if (st === 0x04 || st === 0xe2) {
+            this.publishProperty('remaining_time', 0);
+            this.publishProperty('stage', 'Done');
+            this.spinRampsSeen = 0;
+        }
+        if (st === 0x0b) {
+            this.publishProperty('stage', 'Off');
+            this.spinRampsSeen = 0;
+        }
         if (!sub)
             return;
         const phase = decodePhase(sub[1], sub[2]);
         this.publishProperty('cycle_phase', phase);
         this.lastTumbleTime = Date.now();
+        if (st === 0xec && phase === 'Tumble' && this.spinRampsSeen === 0) {
+            this.publishProperty('stage', 'Washing');
+        }
         const sp = sub[3];
         this.publishProperty('spin', SPINS_VCDWL[sp] ?? 0);
         const cs = sub[4];
@@ -334,7 +371,7 @@ export default class Device extends AABBDevice {
         if (subMarker === 0x05 && sub[20] === 0x01 && phase === 'Idle') {
             this.publishProperty('temp', TEMPERATURES_VCDWL[sub[13]] ?? 'unknown');
         }
-        else {
+        else if (st === 0xec) {
             const remaining = sub[13] | (sub[14] << 8);
             this.publishProperty('remaining_time', remaining);
         }

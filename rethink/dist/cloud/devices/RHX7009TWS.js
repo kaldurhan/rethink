@@ -109,8 +109,36 @@ export default class Device extends AABBDevice {
                     unit_of_measurement: 'min',
                     icon: 'mdi:timer-outline',
                 },
+                stage: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-stage',
+                    state_topic: '$this/stage',
+                    name: 'Stage',
+                    icon: 'mdi:tumble-dryer',
+                    device_class: 'enum',
+                    options: ['Off', 'Paused', 'Heating', 'Drying', 'Cooling', 'Done'],
+                },
             },
         }));
+    }
+    deriveStage() {
+        const runState = this.getProperty('run_state');
+        const phase = this.getProperty('phase');
+        if (runState === 'End' || runState === 'AntiCrease')
+            return 'Done';
+        if (runState === 'Paused')
+            return 'Paused';
+        if (runState === 'Cooldown')
+            return 'Cooling';
+        if (runState === 'Running') {
+            if (phase === 'Startup' || phase === 'Heating')
+                return 'Heating';
+            if (phase === 'Drying')
+                return 'Drying';
+            if (phase === 'Cooldown' || phase === 'Finishing')
+                return 'Cooling';
+        }
+        return 'Off';
     }
     processAABB(inner) {
         // Frame-type guard
@@ -161,8 +189,10 @@ export default class Device extends AABBDevice {
         // firmware sends info-class bursts while the door is held open / cycle paused),
         // not Cooldown. All other info-class ST values are suppressed.
         if (isInfoClass) {
-            if (st === 0x03)
+            if (st === 0x03) {
                 this.publishProperty('run_state', 'Paused');
+                this.publishProperty('stage', 'Paused');
+            }
             return;
         }
         // DisplayOn (0xeb) is transient user-browsing; keep the last meaningful state.
@@ -178,6 +208,10 @@ export default class Device extends AABBDevice {
         }
         if (st === 0x04 || st === 0xe2) {
             this.publishProperty('remaining_time', 0);
+        }
+        // Publish stage for terminal and idle states that may arrive as short packets
+        if (st === 0x0b || st === 0x04 || st === 0xe2) {
+            this.publishProperty('stage', this.deriveStage());
         }
         // Short/standby packet — leave other properties untouched
         if (inner.length < 24)
@@ -196,6 +230,7 @@ export default class Device extends AABBDevice {
         }
         this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`);
         this.publishProperty('phase', decodePhase(phA, phB));
+        this.publishProperty('stage', this.deriveStage());
         // TR interpretation is ST-dependent
         if (st === 0xec) {
             // Running: TR = remaining minutes
