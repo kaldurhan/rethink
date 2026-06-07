@@ -304,11 +304,8 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                         return
                     }
                     if (m === '_close') {
-                        broadcastCloud({ cloudStatus: 'reconnecting' })
+                        broadcastCloud({ cloudStatus: 'disconnected' })
                         cloudMqtt = undefined
-                        // Short delay if we were connected (rate limit window likely passed);
-                        // ensureCloudConnected will enforce the cooldown if needed.
-                        setTimeout(ensureCloudConnected, didConnect ? 5000 : 2000)
                         return
                     }
                     if (m === '_offline') return

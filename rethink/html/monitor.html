@@ -182,6 +182,15 @@
                 font-weight: bold;
                 margin: 0 4px;
             }
+
+            /* ── Fixed reconnect button ── */
+            #btn_cloud_reconnect {
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                z-index: 200;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            }
         </style>
         <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
         <link
@@ -262,15 +271,7 @@
                 <div class="panel-head">
                     <h5 class="orange-text" style="margin: 8px 0 4px">LG Cloud MQTT</h5>
                     <span class="status_label">Status:</span>
-                    <span id="cloud_status" class="status_value">Connecting…</span>
-                    <button
-                        id="btn_cloud_reconnect"
-                        class="btn-small btn waves-effect waves-light"
-                        style="margin-left: 12px; vertical-align: middle"
-                        disabled
-                    >
-                        Reconnect <i class="material-icons right">refresh</i></button
-                    ><br />
+                    <span id="cloud_status" class="status_value">Connecting…</span><br />
                     <span class="status_label">Messages:</span>
                     <span id="cloud_count" class="status_value">0</span>
                 </div>
@@ -346,6 +347,10 @@
             </div>
         </div>
         <!-- #panels -->
+
+        <button id="btn_cloud_reconnect" class="btn waves-effect waves-light" disabled>
+            Reconnect <i class="material-icons right">refresh</i>
+        </button>
 
         <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
         <script src="monitor.js"></script>

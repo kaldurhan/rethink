@@ -129,6 +129,7 @@ const CLOUD_STATUS_LABELS = {
     idle: { text: 'Idle', cls: '' },
     connecting: { text: 'Connecting…', cls: 'warn' },
     reconnecting: { text: 'Reconnecting…', cls: 'warn' },
+    disconnected: { text: 'Disconnected — press Reconnect', cls: 'err' },
     connected: { text: 'Connected ✓', cls: 'ok' },
     'not-logged-in': { text: 'Not logged in — use the login form below', cls: 'err' },
 }
