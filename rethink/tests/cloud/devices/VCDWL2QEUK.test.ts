@@ -253,9 +253,9 @@ describe(MODEL_ID, () => {
             undefined,
         ],
         [
-            'at-20°C steady (phase unknown 0x0210, temp unpublished)',
+            'at-20°C steady (phase Idle 0x0210, temp 20-30)',
             'aaff200a007600020a000100ec006400050110062b00000000000000007a007a0000002b010000000000031a040101755a0000000200041800000000000004000000050210062b00000000000000007a007a0000002b010000000000031a040101755a00000002000418000000000000040000f987bb',
-            undefined,
+            '20-30',
         ],
         [
             'to-40°C scroll (phase Idle, temp 40)',

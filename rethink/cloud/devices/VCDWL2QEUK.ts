@@ -53,6 +53,7 @@ const SPINS_VCDWL: Record<number, number> = {
 // per phase per the wiki notes.
 const PHASES_VCDWL: Record<number, string> = {
     0x0000: 'Finished', // post-cycle Running packets: phA=0x00, phB=0x00
+    0x0210: 'Idle', // 20-30°C settled (scroll series: 0x0110→0x0210→0x0310→0x0510)
     0x0310: 'Idle',
     0x0510: 'Idle',
     0x0810: 'Idle',
