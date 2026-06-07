@@ -337,6 +337,23 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                 ensureCloudConnected()
             }
 
+            ws.on('message', (data) => {
+                try {
+                    const msg = JSON.parse(String(data))
+                    if (msg.reconnect) {
+                        broadcastCloud({ cloudStatus: 'reconnecting' })
+                        const existing = cloudMqtt
+                        cloudMqtt = undefined
+                        cloudConnecting = false
+                        if (existing)
+                            try {
+                                existing.end(true)
+                            } catch {}
+                        ensureCloudConnected()
+                    }
+                } catch {}
+            })
+
             ws.on('close', () => {
                 cloudSubscribers = cloudSubscribers.filter((s) => s !== ws)
             })

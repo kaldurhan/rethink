@@ -262,7 +262,15 @@
                 <div class="panel-head">
                     <h5 class="orange-text" style="margin: 8px 0 4px">LG Cloud MQTT</h5>
                     <span class="status_label">Status:</span>
-                    <span id="cloud_status" class="status_value">Connecting…</span><br />
+                    <span id="cloud_status" class="status_value">Connecting…</span>
+                    <button
+                        id="btn_cloud_reconnect"
+                        class="btn-small btn waves-effect waves-light"
+                        style="margin-left: 12px; vertical-align: middle"
+                        disabled
+                    >
+                        Reconnect <i class="material-icons right">refresh</i></button
+                    ><br />
                     <span class="status_label">Messages:</span>
                     <span id="cloud_count" class="status_value">0</span>
                 </div>
