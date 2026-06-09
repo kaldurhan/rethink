@@ -80,7 +80,7 @@ export default class Device extends AABBDevice {
                 this.offTimer = null
                 this.publishProperty('stage', 'Off')
             },
-            30 * 60 * 1000,
+            5 * 60 * 1000,
         )
     }
 
