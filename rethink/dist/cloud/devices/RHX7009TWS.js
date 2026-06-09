@@ -124,12 +124,10 @@ export default class Device extends AABBDevice {
     deriveStage() {
         const runState = this.getProperty('run_state');
         const phase = this.getProperty('phase');
-        if (runState === 'End' || runState === 'AntiCrease')
+        if (runState === 'End' || runState === 'AntiCrease' || runState === 'Cooldown')
             return 'Done';
         if (runState === 'Paused')
             return 'Paused';
-        if (runState === 'Cooldown')
-            return 'Cooling';
         if (runState === 'Running') {
             if (phase === 'Startup' || phase === 'Heating')
                 return 'Heating';
