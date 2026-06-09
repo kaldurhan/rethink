@@ -125,6 +125,20 @@ function findStatusSubBlock(inner) {
     return -1;
 }
 export default class Device extends AABBDevice {
+    scheduleOff() {
+        if (this.offTimer !== null)
+            clearTimeout(this.offTimer);
+        this.offTimer = setTimeout(() => {
+            this.offTimer = null;
+            this.publishProperty('stage', 'Off');
+        }, 30 * 60 * 1000);
+    }
+    cancelOffTimer() {
+        if (this.offTimer !== null) {
+            clearTimeout(this.offTimer);
+            this.offTimer = null;
+        }
+    }
     constructor(HA, thinq, meta) {
         super(HA, thinq);
         // Timestamp of the last 0x76 sub-block decode. Used to gate 0x53 SpinRamp
@@ -135,6 +149,7 @@ export default class Device extends AABBDevice {
         // Count of intermediate spin-ramp events seen in the current cycle.
         // 0 = still in wash phase; ≥1 = rinse phase has begun.
         this.spinRampsSeen = 0;
+        this.offTimer = null;
         const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown'];
         const phaseOptions = [
             'Idle',
@@ -299,10 +314,7 @@ export default class Device extends AABBDevice {
         // min). Only publish SpinRamp when 0x76 has been silent for >90 s so we
         // don't override the Tumble phase during gentle agitation.
         if (packetType === 0x53) {
-            const isActiveSpin = inner.length >= 14 &&
-                inner[12] === 0x18 &&
-                inner[13] >= 0x12 &&
-                inner[13] <= 0x1f;
+            const isActiveSpin = inner.length >= 14 && inner[12] === 0x18 && inner[13] >= 0x12 && inner[13] <= 0x1f;
             if (isActiveSpin) {
                 const isFinalSpin = Date.now() - this.lastTumbleTime > 90000;
                 if (isFinalSpin) {
@@ -346,9 +358,11 @@ export default class Device extends AABBDevice {
         if (st === 0x04 || st === 0xe2) {
             this.publishProperty('remaining_time', 0);
             this.publishProperty('stage', 'Done');
+            this.scheduleOff();
             this.spinRampsSeen = 0;
         }
         if (st === 0x0b) {
+            this.cancelOffTimer();
             this.publishProperty('stage', 'Off');
             this.spinRampsSeen = 0;
         }
@@ -358,6 +372,7 @@ export default class Device extends AABBDevice {
         this.publishProperty('cycle_phase', phase);
         this.lastTumbleTime = Date.now();
         if (st === 0xec && phase === 'Tumble' && this.spinRampsSeen === 0) {
+            this.cancelOffTimer();
             this.publishProperty('stage', 'Washing');
         }
         const sp = sub[3];

@@ -140,6 +140,25 @@ export default class Device extends AABBDevice {
     // Count of intermediate spin-ramp events seen in the current cycle.
     // 0 = still in wash phase; ≥1 = rinse phase has begun.
     spinRampsSeen = 0
+    private offTimer: ReturnType<typeof setTimeout> | null = null
+
+    private scheduleOff() {
+        if (this.offTimer !== null) clearTimeout(this.offTimer)
+        this.offTimer = setTimeout(
+            () => {
+                this.offTimer = null
+                this.publishProperty('stage', 'Off')
+            },
+            30 * 60 * 1000,
+        )
+    }
+
+    private cancelOffTimer() {
+        if (this.offTimer !== null) {
+            clearTimeout(this.offTimer)
+            this.offTimer = null
+        }
+    }
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
@@ -355,10 +374,12 @@ export default class Device extends AABBDevice {
         if (st === 0x04 || st === 0xe2) {
             this.publishProperty('remaining_time', 0)
             this.publishProperty('stage', 'Done')
+            this.scheduleOff()
             this.spinRampsSeen = 0
         }
 
         if (st === 0x0b) {
+            this.cancelOffTimer()
             this.publishProperty('stage', 'Off')
             this.spinRampsSeen = 0
         }
@@ -370,6 +391,7 @@ export default class Device extends AABBDevice {
         this.lastTumbleTime = Date.now()
 
         if (st === 0xec && phase === 'Tumble' && this.spinRampsSeen === 0) {
+            this.cancelOffTimer()
             this.publishProperty('stage', 'Washing')
         }
 

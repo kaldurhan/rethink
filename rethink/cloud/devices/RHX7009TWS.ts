@@ -71,6 +71,26 @@ const DRYING_MODE: Record<number, string> = {
 // ─── Device class ─────────────────────────────────────────────────────────────
 
 export default class Device extends AABBDevice {
+    private offTimer: ReturnType<typeof setTimeout> | null = null
+
+    private scheduleOff() {
+        if (this.offTimer !== null) clearTimeout(this.offTimer)
+        this.offTimer = setTimeout(
+            () => {
+                this.offTimer = null
+                this.publishProperty('stage', 'Off')
+            },
+            30 * 60 * 1000,
+        )
+    }
+
+    private cancelOffTimer() {
+        if (this.offTimer !== null) {
+            clearTimeout(this.offTimer)
+            this.offTimer = null
+        }
+    }
+
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
         this.setConfig(
@@ -224,7 +244,9 @@ export default class Device extends AABBDevice {
 
         // Publish stage for terminal and idle states that may arrive as short packets
         if (st === 0x0b || st === 0x04 || st === 0xe2) {
+            if (st === 0x0b) this.cancelOffTimer()
             this.publishProperty('stage', this.deriveStage())
+            if (st === 0x04 || st === 0xe2) this.scheduleOff()
         }
 
         // Short/standby packet — leave other properties untouched
@@ -245,11 +267,14 @@ export default class Device extends AABBDevice {
 
         this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
         this.publishProperty('phase', decodePhase(phA, phB))
-        this.publishProperty('stage', this.deriveStage())
+        const stage = this.deriveStage()
+        this.publishProperty('stage', stage)
+        if (stage === 'Done') this.scheduleOff()
 
         // TR interpretation is ST-dependent
         if (st === 0xec) {
-            // Running: TR = remaining minutes
+            // Running: active cycle — cancel any pending Off fallback
+            this.cancelOffTimer()
             this.publishProperty('remaining_time', tr)
         } else if (st === 0xeb) {
             // DisplayOn: phA=0x05 → dryness level; otherwise → drying mode
