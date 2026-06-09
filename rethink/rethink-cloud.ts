@@ -158,3 +158,17 @@ if (config.bridge) {
 if (config.management_port) Management.app(ha, manager, bridge).listen(config.management_port!)
 
 console.log('Rethink cloud ready')
+
+// Notify HA Supervisor to refresh the addon store so the latest version is
+// visible immediately after startup, without requiring an HA restart.
+const supervisorToken = process.env.SUPERVISOR_TOKEN
+if (supervisorToken) {
+    fetch('http://supervisor/store/reload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${supervisorToken}` },
+    })
+        .then((r) => {
+            if (!r.ok) log('status', `Supervisor store reload failed: ${r.status}`)
+        })
+        .catch((err) => log('status', `Supervisor store reload error: ${err}`))
+}
