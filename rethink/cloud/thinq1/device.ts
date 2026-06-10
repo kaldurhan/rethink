@@ -4,6 +4,7 @@ import { Connection } from './connection'
 import { getDeviceMetadata } from './http'
 import { Metadata } from '../thinq'
 import { randomUUID } from 'node:crypto'
+import log from '@/util/logging'
 
 type ConWithExtra = Connection & {
     deviceObj?: Device
@@ -31,7 +32,7 @@ export class Device extends TypedEmitter<DeviceEvents> {
             this.lastReport = packet
             this.emit('data', packet)
         })
-        con.on('error', console.log)
+        con.on('error', (err) => log('ThinQ1', `device error: ${err}`))
         con.on('close', () => {
             if (con.deviceObj === this) {
                 this.emit('close')

@@ -4,7 +4,9 @@ import {
     Environment,
     signInUrl,
     Thinq1Device,
+    Thinq1DeviceState,
     Thinq2Device,
+    Thinq2DeviceState,
 } from './thinqApi'
 import { AnyDevice, DeviceManager } from '../cloud/devmgr'
 import * as OAuth2 from './oauth2'
@@ -14,6 +16,11 @@ import { Connection as Thinq2Connection } from './thinq2connection'
 import { Device as T1Downstream } from '@/cloud/thinq1/device'
 import { Device as T2Downstream } from '@/cloud/thinq2/device'
 import { TypedEmitter } from 'tiny-typed-emitter'
+import log from '@/util/logging'
+
+function isThinq1State(state: Thinq1DeviceState | Thinq2DeviceState): state is Thinq1DeviceState {
+    return 'rtiServer' in state
+}
 
 type StatusCallback = (status: string) => void
 
@@ -64,7 +71,7 @@ class BridgedDevice {
         }
 
         this.connection.on('close', () => this.disconnect())
-        this.connection.on('error', console.log)
+        this.connection.on('error', (err) => log('bridge', `connection error: ${err}`))
     }
 
     reconnectTimeout: NodeJS.Timeout | undefined
@@ -175,22 +182,18 @@ export class Bridge extends TypedEmitter<BridgeEvents> {
         const code = url.searchParams.get('code')
         if (!code) return false
 
-        try {
-            const token = await OAuth2.fromCode(base.authUrl, code)
-            this.state.setCredentials({
-                env,
-                refreshToken: token.refreshToken,
-            })
-            this.emit('loggedIn')
-            return true
-        } catch (err) {
-            return false
-        }
+        const token = await OAuth2.fromCode(base.authUrl, code)
+        this.state.setCredentials({
+            env,
+            refreshToken: token.refreshToken,
+        })
+        this.emit('loggedIn')
+        return true
     }
 
     logout() {
         this.state.setCredentials(undefined)
-        // FIXME? drop all devices
+        for (const id of Array.from(this.bridgedDevices.keys())) this.#stop(id)
         this.emit('loggedOut')
     }
 
@@ -237,7 +240,6 @@ export class Bridge extends TypedEmitter<BridgeEvents> {
             await client.addDevice(clientDevice, `Rethink ${device.id.substring(0, 8)}`, deviceType, ciphertext)
         } else {
             throw new Error('Unknown device platform')
-            return
         }
 
         statusCallback('Device registered successfully')
@@ -249,13 +251,8 @@ export class Bridge extends TypedEmitter<BridgeEvents> {
     loadSavedDevice(device: AnyDevice) {
         const state = this.state.getDeviceState(device.id)
         if (state) {
-            if ('rtiServer' in state) {
-                // thinq1
-                return new Thinq1Device(device.id, device.meta, state)
-            } else if ('mqttServer' in state) {
-                // thinq2
-                return new Thinq2Device(device.id, device.meta, state)
-            }
+            if (isThinq1State(state)) return new Thinq1Device(device.id, device.meta, state)
+            return new Thinq2Device(device.id, device.meta, state)
         }
 
         return undefined

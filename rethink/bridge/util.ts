@@ -8,6 +8,10 @@ export function subprocess(command: string, args: string[], stdin: string = ''):
             out.push(data)
         })
         subprocess.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(`${command} exited with code ${code}`))
+                return
+            }
             resolve(Buffer.concat(out).toString('utf-8'))
         })
         subprocess.on('error', reject)

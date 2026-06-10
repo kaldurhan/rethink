@@ -3,8 +3,10 @@ import HADevice from './base'
 import { Device as Thinq2Device } from '../thinq2/device'
 import { type Connection } from '../homeassistant'
 
-export default class AABBDevice extends HADevice {
+export default abstract class AABBDevice extends HADevice {
     publishCache: Record<string, string | number> = {}
+
+    private offTimer: ReturnType<typeof setTimeout> | null = null
 
     constructor(
         HA: Connection,
@@ -30,9 +32,7 @@ export default class AABBDevice extends HADevice {
         }
     }
 
-    processAABB(buf: Buffer) {
-        throw new Error('To be overriden')
-    }
+    abstract processAABB(buf: Buffer): void
 
     // to be called by processAABB
     publishProperty(prop: string, value: string | number) {
@@ -44,5 +44,22 @@ export default class AABBDevice extends HADevice {
 
     getProperty(prop: string): string | number | undefined {
         return this.publishCache[prop]
+    }
+
+    // Publish 'Off' to the stage property after a delay. If a Standby packet or
+    // a new active cycle arrives first, cancelOffTimer() prevents the publish.
+    protected scheduleOff(delayMs = 5 * 60 * 1000) {
+        if (this.offTimer !== null) clearTimeout(this.offTimer)
+        this.offTimer = setTimeout(() => {
+            this.offTimer = null
+            this.publishProperty('stage', 'Off')
+        }, delayMs)
+    }
+
+    protected cancelOffTimer() {
+        if (this.offTimer !== null) {
+            clearTimeout(this.offTimer)
+            this.offTimer = null
+        }
     }
 }

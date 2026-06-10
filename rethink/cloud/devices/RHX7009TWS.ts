@@ -3,7 +3,6 @@ import { type Connection } from '../homeassistant'
 import { type Metadata } from '../thinq'
 import AABBDevice from './aabb_device'
 import HADevice from './base'
-import { allowExtendedType } from '@/util/casting'
 
 // ─── Lookup tables ────────────────────────────────────────────────────────────
 
@@ -71,89 +70,67 @@ const DRYING_MODE: Record<number, string> = {
 // ─── Device class ─────────────────────────────────────────────────────────────
 
 export default class Device extends AABBDevice {
-    private offTimer: ReturnType<typeof setTimeout> | null = null
-
-    private scheduleOff() {
-        if (this.offTimer !== null) clearTimeout(this.offTimer)
-        this.offTimer = setTimeout(
-            () => {
-                this.offTimer = null
-                this.publishProperty('stage', 'Off')
-            },
-            5 * 60 * 1000,
-        )
-    }
-
-    private cancelOffTimer() {
-        if (this.offTimer !== null) {
-            clearTimeout(this.offTimer)
-            this.offTimer = null
-        }
-    }
-
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
-        this.setConfig(
-            allowExtendedType({
-                ...HADevice.config(meta, { name: 'LG RHX7009TWS Dryer' }),
-                components: {
-                    run_state: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-run-state',
-                        state_topic: '$this/run_state',
-                        name: 'Run state',
-                        icon: 'mdi:state-machine',
-                        device_class: 'enum',
-                        options: ['Standby', 'Running', 'Paused', 'Cooldown', 'AntiCrease', 'End'],
-                    },
-                    program: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-program',
-                        state_topic: '$this/program',
-                        name: 'Program',
-                        icon: 'mdi:tumble-dryer',
-                    },
-                    phase: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-phase',
-                        state_topic: '$this/phase',
-                        name: 'Phase',
-                        icon: 'mdi:progress-clock',
-                    },
-                    dryness_level: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-dryness-level',
-                        state_topic: '$this/dryness_level',
-                        name: 'Dryness level',
-                        icon: 'mdi:water-percent',
-                    },
-                    drying_mode: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-drying-mode',
-                        state_topic: '$this/drying_mode',
-                        name: 'Drying mode',
-                        icon: 'mdi:leaf',
-                    },
-                    remaining_time: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-remaining-time',
-                        state_topic: '$this/remaining_time',
-                        name: 'Time remaining',
-                        unit_of_measurement: 'min',
-                        icon: 'mdi:timer-outline',
-                    },
-                    stage: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-stage',
-                        state_topic: '$this/stage',
-                        name: 'Stage',
-                        icon: 'mdi:tumble-dryer',
-                        device_class: 'enum',
-                        options: ['Off', 'Paused', 'Heating', 'Drying', 'Cooling', 'Done'],
-                    },
+        this.setConfig({
+            ...HADevice.config(meta, { name: 'LG RHX7009TWS Dryer' }),
+            components: {
+                run_state: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-run-state',
+                    state_topic: '$this/run_state',
+                    name: 'Run state',
+                    icon: 'mdi:state-machine',
+                    device_class: 'enum',
+                    options: ['Standby', 'Running', 'Paused', 'Cooldown', 'AntiCrease', 'End'],
                 },
-            }),
-        )
+                program: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-program',
+                    state_topic: '$this/program',
+                    name: 'Program',
+                    icon: 'mdi:tumble-dryer',
+                },
+                phase: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-phase',
+                    state_topic: '$this/phase',
+                    name: 'Phase',
+                    icon: 'mdi:progress-clock',
+                },
+                dryness_level: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-dryness-level',
+                    state_topic: '$this/dryness_level',
+                    name: 'Dryness level',
+                    icon: 'mdi:water-percent',
+                },
+                drying_mode: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-drying-mode',
+                    state_topic: '$this/drying_mode',
+                    name: 'Drying mode',
+                    icon: 'mdi:leaf',
+                },
+                remaining_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-remaining-time',
+                    state_topic: '$this/remaining_time',
+                    name: 'Time remaining',
+                    unit_of_measurement: 'min',
+                    icon: 'mdi:timer-outline',
+                },
+                stage: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-stage',
+                    state_topic: '$this/stage',
+                    name: 'Stage',
+                    icon: 'mdi:tumble-dryer',
+                    device_class: 'enum',
+                    options: ['Off', 'Paused', 'Heating', 'Drying', 'Cooling', 'Done'],
+                },
+            },
+        })
     }
 
     start() {

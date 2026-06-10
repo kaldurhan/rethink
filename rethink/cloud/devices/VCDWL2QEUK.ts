@@ -3,7 +3,6 @@ import { type Connection } from '../homeassistant'
 import { type Metadata } from '../thinq'
 import AABBDevice from './aabb_device'
 import HADevice from './base'
-import { allowExtendedType } from '@/util/casting'
 
 // inner[10] — run state.
 const STATES_VCDWL: Record<number, string> = {
@@ -140,25 +139,6 @@ export default class Device extends AABBDevice {
     // Count of intermediate spin-ramp events seen in the current cycle.
     // 0 = still in wash phase; ≥1 = rinse phase has begun.
     spinRampsSeen = 0
-    private offTimer: ReturnType<typeof setTimeout> | null = null
-
-    private scheduleOff() {
-        if (this.offTimer !== null) clearTimeout(this.offTimer)
-        this.offTimer = setTimeout(
-            () => {
-                this.offTimer = null
-                this.publishProperty('stage', 'Off')
-            },
-            5 * 60 * 1000,
-        )
-    }
-
-    private cancelOffTimer() {
-        if (this.offTimer !== null) {
-            clearTimeout(this.offTimer)
-            this.offTimer = null
-        }
-    }
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
@@ -178,123 +158,121 @@ export default class Device extends AABBDevice {
             'Finished',
             'unknown',
         ]
-        this.setConfig(
-            allowExtendedType({
-                ...HADevice.config(meta, { name: 'LG F4X7511TWS' }),
-                components: {
-                    run_state: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-run_state',
-                        state_topic: '$this/run_state',
-                        name: 'Run state',
-                        icon: 'mdi:power',
-                        device_class: 'enum',
-                        options: ['Standby', 'Running', 'End', 'AntiCrease'],
-                    },
-                    cycle_phase: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-cycle_phase',
-                        state_topic: '$this/cycle_phase',
-                        name: 'Cycle phase',
-                        icon: 'mdi:state-machine',
-                        device_class: 'enum',
-                        options: phaseOptions,
-                    },
-                    course: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-course',
-                        state_topic: '$this/course',
-                        name: 'Program',
-                        icon: 'mdi:tumble-dryer',
-                        device_class: 'enum',
-                        options: courseOptions,
-                    },
-                    temp: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-temp',
-                        state_topic: '$this/temp',
-                        name: 'Temperature',
-                        icon: 'mdi:thermometer',
-                        device_class: 'enum',
-                        options: ['Cold', '20-30', '40', '60', 'unknown'],
-                    },
-                    spin: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-spin',
-                        state_topic: '$this/spin',
-                        name: 'Spin speed',
-                        icon: 'mdi:fan',
-                        unit_of_measurement: 'rpm',
-                        state_class: 'measurement',
-                    },
-                    remaining_time: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-remaining_time',
-                        state_topic: '$this/remaining_time',
-                        name: 'Time remaining',
-                        icon: 'mdi:timer-outline',
-                        unit_of_measurement: 'min',
-                        state_class: 'measurement',
-                    },
-                    course_spend_power: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-course_spend_power',
-                        state_topic: '$this/course_spend_power',
-                        name: 'Cycle energy',
-                        icon: 'mdi:lightning-bolt',
-                        unit_of_measurement: 'Wh',
-                        state_class: 'measurement',
-                        device_class: 'energy',
-                    },
-                    door: {
-                        platform: 'binary_sensor',
-                        unique_id: '$deviceid-door',
-                        state_topic: '$this/door',
-                        name: 'Door',
-                        device_class: 'door',
-                        payload_on: 'open',
-                        payload_off: 'closed',
-                    },
-                    water_temp: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-water_temp',
-                        state_topic: '$this/water_temp',
-                        name: 'Water temperature',
-                        icon: 'mdi:thermometer-water',
-                        unit_of_measurement: '°C',
-                        state_class: 'measurement',
-                        device_class: 'temperature',
-                    },
-                    elapsed_time: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-elapsed_time',
-                        state_topic: '$this/elapsed_time',
-                        name: 'Elapsed time',
-                        icon: 'mdi:timer-play-outline',
-                        unit_of_measurement: 'min',
-                        state_class: 'measurement',
-                    },
-                    phase_remaining_time: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-phase_remaining_time',
-                        state_topic: '$this/phase_remaining_time',
-                        name: 'Phase time remaining',
-                        icon: 'mdi:timer-outline',
-                        unit_of_measurement: 'min',
-                        state_class: 'measurement',
-                    },
-                    stage: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-stage',
-                        state_topic: '$this/stage',
-                        name: 'Stage',
-                        icon: 'mdi:washing-machine',
-                        device_class: 'enum',
-                        options: ['Off', 'Washing', 'Rinsing', 'Spinning', 'Done'],
-                    },
+        this.setConfig({
+            ...HADevice.config(meta, { name: 'LG F4X7511TWS' }),
+            components: {
+                run_state: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-run_state',
+                    state_topic: '$this/run_state',
+                    name: 'Run state',
+                    icon: 'mdi:power',
+                    device_class: 'enum',
+                    options: ['Standby', 'Running', 'End', 'AntiCrease'],
                 },
-            }),
-        )
+                cycle_phase: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-cycle_phase',
+                    state_topic: '$this/cycle_phase',
+                    name: 'Cycle phase',
+                    icon: 'mdi:state-machine',
+                    device_class: 'enum',
+                    options: phaseOptions,
+                },
+                course: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-course',
+                    state_topic: '$this/course',
+                    name: 'Program',
+                    icon: 'mdi:tumble-dryer',
+                    device_class: 'enum',
+                    options: courseOptions,
+                },
+                temp: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-temp',
+                    state_topic: '$this/temp',
+                    name: 'Temperature',
+                    icon: 'mdi:thermometer',
+                    device_class: 'enum',
+                    options: ['Cold', '20-30', '40', '60', 'unknown'],
+                },
+                spin: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-spin',
+                    state_topic: '$this/spin',
+                    name: 'Spin speed',
+                    icon: 'mdi:fan',
+                    unit_of_measurement: 'rpm',
+                    state_class: 'measurement',
+                },
+                remaining_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-remaining_time',
+                    state_topic: '$this/remaining_time',
+                    name: 'Time remaining',
+                    icon: 'mdi:timer-outline',
+                    unit_of_measurement: 'min',
+                    state_class: 'measurement',
+                },
+                course_spend_power: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-course_spend_power',
+                    state_topic: '$this/course_spend_power',
+                    name: 'Cycle energy',
+                    icon: 'mdi:lightning-bolt',
+                    unit_of_measurement: 'Wh',
+                    state_class: 'measurement',
+                    device_class: 'energy',
+                },
+                door: {
+                    platform: 'binary_sensor',
+                    unique_id: '$deviceid-door',
+                    state_topic: '$this/door',
+                    name: 'Door',
+                    device_class: 'door',
+                    payload_on: 'open',
+                    payload_off: 'closed',
+                },
+                water_temp: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-water_temp',
+                    state_topic: '$this/water_temp',
+                    name: 'Water temperature',
+                    icon: 'mdi:thermometer-water',
+                    unit_of_measurement: '°C',
+                    state_class: 'measurement',
+                    device_class: 'temperature',
+                },
+                elapsed_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-elapsed_time',
+                    state_topic: '$this/elapsed_time',
+                    name: 'Elapsed time',
+                    icon: 'mdi:timer-play-outline',
+                    unit_of_measurement: 'min',
+                    state_class: 'measurement',
+                },
+                phase_remaining_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-phase_remaining_time',
+                    state_topic: '$this/phase_remaining_time',
+                    name: 'Phase time remaining',
+                    icon: 'mdi:timer-outline',
+                    unit_of_measurement: 'min',
+                    state_class: 'measurement',
+                },
+                stage: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-stage',
+                    state_topic: '$this/stage',
+                    name: 'Stage',
+                    icon: 'mdi:washing-machine',
+                    device_class: 'enum',
+                    options: ['Off', 'Washing', 'Rinsing', 'Spinning', 'Done'],
+                },
+            },
+        })
     }
 
     start() {

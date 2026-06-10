@@ -10,7 +10,12 @@ type DeviceManagerEvents = {
 }
 
 export class DeviceManager extends TypedEmitter<DeviceManagerEvents> {
-    allDevices: Record<string, AnyDevice> = {}
+    // Treat as read-only outside this class; use getDevice() for single lookups.
+    readonly allDevices: Record<string, AnyDevice> = {}
+
+    getDevice(id: string): AnyDevice | undefined {
+        return this.allDevices[id]
+    }
 
     accept(device: AnyDevice) {
         this.allDevices[device.id] = device

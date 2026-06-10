@@ -24,7 +24,9 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
     function broadcast(message: object) {
         const str = JSON.stringify(message)
         subscribers.forEach((sub) => {
-            sub.send(str)
+            try {
+                sub.send(str)
+            } catch {}
         })
     }
 
@@ -50,8 +52,6 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                     devices: enumDevices(),
                 }),
             )
-
-            ws.on('message', (msg) => {})
 
             ws.on('close', () => {
                 subscribers = subscribers.filter((el) => el !== ws)
@@ -254,8 +254,13 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
     // on the first browser connection; kept alive for the process lifetime once
     // started so subsequent connections don't need to re-run the slow openssl /
     // certificate API round-trip. All browser subscribers share one feed.
-    let cloudMqtt: MqttClient | undefined
-    let cloudConnecting = false
+    type CloudState =
+        | { status: 'idle' }
+        | { status: 'rate-limited'; retryAt: number }
+        | { status: 'connecting' }
+        | { status: 'connected'; client: MqttClient }
+
+    let cloud: CloudState = { status: 'idle' }
     let cloudSubscribers: ExtendedWebSocket[] = []
     let lastCertGeneratedAt = 0
     const CERT_MIN_INTERVAL = 65_000 // LG rate-limits cert generation; ~60 s observed
@@ -270,53 +275,63 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
     }
 
     async function ensureCloudConnected() {
-        if (cloudMqtt || cloudConnecting) return
+        if (cloud.status === 'connecting' || cloud.status === 'connected') return
 
-        // Respect LG's cert-generation rate limit. If we just generated a cert,
-        // wait out the remainder of the cooldown window before trying again.
+        if (cloud.status === 'rate-limited') {
+            const wait = cloud.retryAt - Date.now()
+            if (wait > 0) {
+                broadcastCloud({ cloudStatus: `reconnecting in ${Math.ceil(wait / 1000)}s…` })
+                setTimeout(ensureCloudConnected, wait)
+                return
+            }
+        }
+
+        // Respect LG's cert-generation rate limit.
         const sinceLastCert = Date.now() - lastCertGeneratedAt
         if (sinceLastCert < CERT_MIN_INTERVAL) {
-            const wait = CERT_MIN_INTERVAL - sinceLastCert
-            broadcastCloud({ cloudStatus: `reconnecting in ${Math.ceil(wait / 1000)}s…` })
-            setTimeout(ensureCloudConnected, wait)
+            const retryAt = Date.now() + (CERT_MIN_INTERVAL - sinceLastCert)
+            cloud = { status: 'rate-limited', retryAt }
+            broadcastCloud({ cloudStatus: `reconnecting in ${Math.ceil((retryAt - Date.now()) / 1000)}s…` })
+            setTimeout(ensureCloudConnected, retryAt - Date.now())
             return
         }
 
-        cloudConnecting = true
+        cloud = { status: 'connecting' }
         broadcastCloud({ cloudStatus: 'connecting' })
         try {
             const state = loadState()
             if (!state) {
+                cloud = { status: 'idle' }
                 broadcastCloud({ cloudStatus: 'not-logged-in' })
                 return
             }
             broadcastCloud({ cloudStatus: 'generating certificate…' })
             lastCertGeneratedAt = Date.now()
 
-            let didConnect = false
-            cloudMqtt = await connect(state, {
+            const client = await connect(state, {
                 onMessage: (msg) => broadcastCloud({ cloud: msg }),
                 log: (m) => {
                     log('CLOUD', m)
                     if (m === 'connected') {
-                        didConnect = true
+                        // connect() has already resolved so `client` is assigned.
+                        cloud = { status: 'connected', client }
                         broadcastCloud({ cloudStatus: 'connected' })
                         return
                     }
                     if (m === '_close') {
                         broadcastCloud({ cloudStatus: 'disconnected' })
-                        cloudMqtt = undefined
+                        cloud = { status: 'idle' }
                         return
                     }
                     if (m === '_offline') return
                     broadcastCloud({ cloudStatus: m })
                 },
             })
+            if (cloud.status === 'connecting') cloud = { status: 'connected', client }
         } catch (err) {
             log('CLOUD', `connection failed: ${err}`)
             broadcastCloud({ cloudStatus: `error: ${err}` })
-        } finally {
-            cloudConnecting = false
+            cloud = { status: 'idle' }
         }
     }
 
@@ -325,9 +340,9 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
             cloudSubscribers.push(ws)
 
             // Tell this browser the current state immediately
-            if (cloudMqtt) {
+            if (cloud.status === 'connected') {
                 ws.send(JSON.stringify({ cloudStatus: 'connected' }))
-            } else if (cloudConnecting) {
+            } else if (cloud.status === 'connecting') {
                 ws.send(JSON.stringify({ cloudStatus: 'connecting' }))
             } else {
                 ws.send(JSON.stringify({ cloudStatus: 'idle' }))
@@ -339,13 +354,12 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                     const msg = JSON.parse(String(data))
                     if (msg.reconnect) {
                         broadcastCloud({ cloudStatus: 'reconnecting' })
-                        const existing = cloudMqtt
-                        cloudMqtt = undefined
-                        cloudConnecting = false
-                        if (existing)
+                        if (cloud.status === 'connected') {
                             try {
-                                existing.end(true)
+                                cloud.client.end(true)
                             } catch {}
+                        }
+                        cloud = { status: 'idle' }
                         ensureCloudConnected()
                     }
                 } catch {}

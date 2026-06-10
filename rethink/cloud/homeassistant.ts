@@ -178,6 +178,21 @@ export type ComponentInfo = {
     name?: string | null
     platform: string
     unique_id: string
+    // Common optional discovery fields shared across platforms.
+    // Add fields here rather than reaching for allowExtendedType.
+    state_topic?: string
+    command_topic?: string
+    icon?: string
+    device_class?: string
+    options?: string[]
+    unit_of_measurement?: string
+    value_template?: string
+    payload_on?: string
+    payload_off?: string
+    optimistic?: boolean
+    retain?: boolean
+    qos?: number
+    [key: string]: unknown
 }
 
 export type DeviceDiscovery = {

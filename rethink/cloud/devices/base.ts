@@ -47,7 +47,7 @@ export default class HADevice {
         }
     }
 
-    setProperty(prop: string, mqttValue: string) {
-        throw new Error('To be overriden')
+    setProperty(_prop: string, _mqttValue: string) {
+        // read-only device: override in subclasses that accept commands
     }
 }
