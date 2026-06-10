@@ -156,6 +156,10 @@ export default class Device extends AABBDevice {
         )
     }
 
+    start() {
+        this.publishProperty('stage', 'Off')
+    }
+
     private deriveStage(): string {
         const runState = this.getProperty('run_state')
         const phase = this.getProperty('phase')

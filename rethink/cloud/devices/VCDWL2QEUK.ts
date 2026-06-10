@@ -297,6 +297,10 @@ export default class Device extends AABBDevice {
         )
     }
 
+    start() {
+        this.publishProperty('stage', 'Off')
+    }
+
     processAABB(inner: Buffer) {
         if (inner.length < 11 || inner[0] !== 0x20) return
 
