@@ -1,7 +1,8 @@
 import express from 'express';
 import { mkdirSync, readFileSync } from 'node:fs';
 import * as https from 'node:https';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { dirname, resolve } from 'node:path';
 import { Broker } from './cloud/mqtt-broker.js';
 import * as tls from 'node:tls';
@@ -18,6 +19,7 @@ import log, { setFilter as setLogFilter } from './util/logging.js';
 import { DeviceManager } from './cloud/devmgr.js';
 import { Bridge } from './bridge/index.js';
 import { JSONStorage } from './bridge/state.js';
+const execFileAsync = promisify(execFile);
 const configPath = resolve(process.argv[2] ?? './config.json');
 const configDir = dirname(configPath);
 const config = JSON.parse(readFileSync(configPath).toString('utf-8'));
@@ -31,9 +33,8 @@ const enabled = Object.fromEntries(config.log.map((key) => [key, true]));
 setLogFilter((topic) => {
     return enabled[topic] || enabled['all'];
 });
-// if you add spaces here, you will have to fix quoting in the code below
 // the CA is also the server
-function loadOrCreateCert() {
+async function loadOrCreateCert() {
     let keypem, certpem;
     try {
         keypem = readFileSync(config.ca_key_file).toString('utf-8');
@@ -43,7 +44,7 @@ function loadOrCreateCert() {
     }
     catch (err) {
         log('status', 'Creating a new key/certificate for the CA');
-        spawnSync('openssl', [
+        await execFileAsync('openssl', [
             'req',
             '-x509',
             '-newkey',
@@ -64,9 +65,8 @@ function loadOrCreateCert() {
     }
     return { key: keypem, cert: certpem };
 }
-const ca = loadOrCreateCert();
 // Thinq1
-function t1setup(manager) {
+function t1setup(manager, ca) {
     // Thinq1 HTTPS server
     const app = express();
     app.use(function (req, res, next) {
@@ -84,7 +84,7 @@ function t1setup(manager) {
     acceptor.on('newDevice', manager.accept.bind(manager));
 }
 // Thinq2
-function t2setup(manager) {
+function t2setup(manager, ca) {
     // Thinq2 HTTPS server
     const app = express();
     app.use(express.json());
@@ -118,18 +118,25 @@ function t2setup(manager) {
     const acceptor = new T2Acceptor(broker);
     acceptor.on('newDevice', manager.accept.bind(manager));
 }
-// HA connector
-const ha = new HA_bridge(new HA_connection(config.homeassistant));
-const manager = new DeviceManager();
-manager.on('newDevice', (dev) => ha.newDevice(dev));
-t1setup(manager);
-t2setup(manager);
-let bridge;
-if (config.bridge) {
-    mkdirSync(config.bridge.storage_path, { recursive: true });
-    const storage = new JSONStorage(config.bridge.storage_path);
-    bridge = new Bridge(storage, manager);
+async function main() {
+    const ca = await loadOrCreateCert();
+    // HA connector
+    const ha = new HA_bridge(new HA_connection(config.homeassistant));
+    const manager = new DeviceManager();
+    manager.on('newDevice', (dev) => ha.newDevice(dev));
+    t1setup(manager, ca);
+    t2setup(manager, ca);
+    let bridge;
+    if (config.bridge) {
+        mkdirSync(config.bridge.storage_path, { recursive: true });
+        const storage = new JSONStorage(config.bridge.storage_path);
+        bridge = new Bridge(storage, manager);
+    }
+    if (config.management_port)
+        Management.app(ha, manager, bridge).listen(config.management_port);
+    console.log('Rethink cloud ready');
 }
-if (config.management_port)
-    Management.app(ha, manager, bridge).listen(config.management_port);
-console.log('Rethink cloud ready');
+main().catch((err) => {
+    console.error('Fatal startup error:', err);
+    process.exit(1);
+});

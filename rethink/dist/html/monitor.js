@@ -129,6 +129,7 @@ const CLOUD_STATUS_LABELS = {
     idle: { text: 'Idle', cls: '' },
     connecting: { text: 'Connecting…', cls: 'warn' },
     reconnecting: { text: 'Reconnecting…', cls: 'warn' },
+    disconnected: { text: 'Disconnected — press Reconnect', cls: 'err' },
     connected: { text: 'Connected ✓', cls: 'ok' },
     'not-logged-in': { text: 'Not logged in — use the login form below', cls: 'err' },
 }
@@ -139,8 +140,18 @@ function setCloudStatus(raw) {
     el.innerText = known ? known.text : raw
     el.className = 'status_value' + (known?.cls ? ' ' + known.cls : '')
     get('cloud_login').style.display = raw === 'not-logged-in' ? 'block' : 'none'
+    // Enable reconnect when connected or on error/unknown; disable while actively connecting.
+    const busy = raw === 'connecting' || raw === 'generating certificate…' || raw === 'not-logged-in'
+    get('btn_cloud_reconnect').disabled = busy
     if (get('cloud_show_status').checked)
         pushCloudLog(known ? known.text : raw, known?.cls || (raw.startsWith('error') ? 'err' : ''))
+}
+
+get('btn_cloud_reconnect').onclick = () => {
+    if (cloudWs && cloudWs.readyState === WebSocket.OPEN) {
+        cloudWs.send(JSON.stringify({ reconnect: true }))
+        get('btn_cloud_reconnect').disabled = true
+    }
 }
 
 // ── Cloud login flow ─────────────────────────────────────────────────────────

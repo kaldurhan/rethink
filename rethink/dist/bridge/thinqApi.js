@@ -3,6 +3,7 @@ import * as OAuth2 from './oauth2.js';
 import { RSA_PKCS1_PADDING } from 'node:constants';
 import { subprocess } from './util.js';
 import fetch from 'node-fetch';
+import log from '../util/logging.js';
 export const IOT_BASE_URL = 'https://common.lgthinq.com';
 const GATEWAY_URL = 'https://route.lgthinq.com:46030/v1/service/application/gateway-uri';
 export function signInUrl(baseUrl, countryCode) {
@@ -38,7 +39,7 @@ export async function apiFetch(url, options) {
         }
     }
     if (out.resultCode !== '0000') {
-        console.log(url, options, out);
+        log('bridge', `API error ${out.resultCode} from ${url}`);
         throw new RemoteError(url, out.resultCode, out.result);
     }
     return out.result;
@@ -100,10 +101,10 @@ export class Client {
             'X-Device-Platform': 'ADR',
         });
         if (profile.status !== 1) {
-            console.log(profile);
+            log('bridge', `unexpected profile status: ${JSON.stringify(profile)}`);
             throw new Error("Can't query user information");
         }
-        console.log(`Welcome ${profile.account.userID}!`);
+        log('bridge', `authenticated as ${profile.account.userID}`);
         this.headers['x-user-no'] = profile.account.userNo;
         this.headers['x-emp-token'] = accessToken;
         // I'm not sure what this call means, but without it, the otp/certificate call returns "access denied"
@@ -179,7 +180,7 @@ export class Client {
         }
         catch (err) {
             if (err instanceof RemoteError && err.resultCode === ErrorCodes.ERROR_ALREADY_DEVICES_REGISTERED_IN_HOME) {
-                console.log('Device already registered, retrying with initDevice=true');
+                log('bridge', 'device already registered, retrying with initDevice=true');
                 body.initDevice = true;
                 await apiFetch(`${thinq2Uri}/service/homes/${this.homeId}/devices`, {
                     headers: this.headers,
@@ -215,14 +216,14 @@ export class Thinq2Device {
         this.state = state;
     }
     async pair(env, otpResponse) {
-        console.log('Fetching API urls');
+        log('bridge', 'fetching API urls');
         const servers = await apiFetch(`${IOT_BASE_URL}/route`, {
             headers: { 'x-country-code': env.countryCode, 'x-service-phase': 'OP', accept: 'application/json' },
         });
-        console.log('Fetching CA cert');
+        log('bridge', 'fetching CA cert');
         // DEV call
         const { certificatePem: ca } = await apiFetch(`${IOT_BASE_URL}/route/certificate?name=aws-iot`, { headers: { accept: 'application/json' } });
-        console.log('Trying to generate a certificate with otp', otpResponse.otp);
+        log('bridge', 'generating device certificate');
         const privateKey = await subprocess('openssl', [
             'ecparam',
             '-genkey',

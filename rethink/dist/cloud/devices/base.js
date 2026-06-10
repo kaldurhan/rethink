@@ -36,7 +36,7 @@ export default class HADevice {
             this.HA.publishConfig(this.id, this.config);
         }
     }
-    setProperty(prop, mqttValue) {
-        throw new Error('To be overriden');
+    setProperty(_prop, _mqttValue) {
+        // read-only device: override in subclasses that accept commands
     }
 }

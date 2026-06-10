@@ -1,6 +1,5 @@
 import AABBDevice from './aabb_device.js';
 import HADevice from './base.js';
-import { allowExtendedType } from '../../util/casting.js';
 // ─── Lookup tables ────────────────────────────────────────────────────────────
 // inner[10] — machine state
 const STATES = {
@@ -59,24 +58,9 @@ const DRYING_MODE = {
 };
 // ─── Device class ─────────────────────────────────────────────────────────────
 export default class Device extends AABBDevice {
-    scheduleOff() {
-        if (this.offTimer !== null)
-            clearTimeout(this.offTimer);
-        this.offTimer = setTimeout(() => {
-            this.offTimer = null;
-            this.publishProperty('stage', 'Off');
-        }, 5 * 60 * 1000);
-    }
-    cancelOffTimer() {
-        if (this.offTimer !== null) {
-            clearTimeout(this.offTimer);
-            this.offTimer = null;
-        }
-    }
     constructor(HA, thinq, meta) {
         super(HA, thinq);
-        this.offTimer = null;
-        this.setConfig(allowExtendedType({
+        this.setConfig({
             ...HADevice.config(meta, { name: 'LG RHX7009TWS Dryer' }),
             components: {
                 run_state: {
@@ -134,7 +118,7 @@ export default class Device extends AABBDevice {
                     options: ['Off', 'Paused', 'Heating', 'Drying', 'Cooling', 'Done'],
                 },
             },
-        }));
+        });
     }
     start() {
         this.publishProperty('stage', 'Off');

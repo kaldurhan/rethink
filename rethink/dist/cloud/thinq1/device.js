@@ -2,6 +2,7 @@ import { TypedEmitter } from 'tiny-typed-emitter';
 import { Connection } from './connection.js';
 import { getDeviceMetadata } from './http.js';
 import { randomUUID } from 'node:crypto';
+import log from '../../util/logging.js';
 export class Device extends TypedEmitter {
     constructor(con, id, meta) {
         super();
@@ -14,7 +15,7 @@ export class Device extends TypedEmitter {
             this.lastReport = packet;
             this.emit('data', packet);
         });
-        con.on('error', console.log);
+        con.on('error', (err) => log('ThinQ1', `device error: ${err}`));
         con.on('close', () => {
             if (con.deviceObj === this) {
                 this.emit('close');

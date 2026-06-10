@@ -1,6 +1,5 @@
 import AABBDevice from './aabb_device.js';
 import HADevice from './base.js';
-import { allowExtendedType } from '../../util/casting.js';
 // inner[10] — run state.
 const STATES_VCDWL = {
     0x0b: 'Standby',
@@ -125,20 +124,6 @@ function findStatusSubBlock(inner) {
     return -1;
 }
 export default class Device extends AABBDevice {
-    scheduleOff() {
-        if (this.offTimer !== null)
-            clearTimeout(this.offTimer);
-        this.offTimer = setTimeout(() => {
-            this.offTimer = null;
-            this.publishProperty('stage', 'Off');
-        }, 5 * 60 * 1000);
-    }
-    cancelOffTimer() {
-        if (this.offTimer !== null) {
-            clearTimeout(this.offTimer);
-            this.offTimer = null;
-        }
-    }
     constructor(HA, thinq, meta) {
         super(HA, thinq);
         // Timestamp of the last 0x76 sub-block decode. Used to gate 0x53 SpinRamp
@@ -149,7 +134,6 @@ export default class Device extends AABBDevice {
         // Count of intermediate spin-ramp events seen in the current cycle.
         // 0 = still in wash phase; ≥1 = rinse phase has begun.
         this.spinRampsSeen = 0;
-        this.offTimer = null;
         const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown'];
         const phaseOptions = [
             'Idle',
@@ -166,7 +150,7 @@ export default class Device extends AABBDevice {
             'Finished',
             'unknown',
         ];
-        this.setConfig(allowExtendedType({
+        this.setConfig({
             ...HADevice.config(meta, { name: 'LG F4X7511TWS' }),
             components: {
                 run_state: {
@@ -280,7 +264,7 @@ export default class Device extends AABBDevice {
                     options: ['Off', 'Washing', 'Rinsing', 'Spinning', 'Done'],
                 },
             },
-        }));
+        });
     }
     start() {
         this.publishProperty('stage', 'Off');

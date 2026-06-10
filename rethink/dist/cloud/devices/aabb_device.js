@@ -5,6 +5,7 @@ export default class AABBDevice extends HADevice {
         super(HA, thinq.id);
         this.thinq = thinq;
         this.publishCache = {};
+        this.offTimer = null;
         thinq.on('data', (data) => this.processData(data));
     }
     // sends a packet of the format:
@@ -21,9 +22,6 @@ export default class AABBDevice extends HADevice {
             this.processAABB(buf.subarray(2, buf.length - 2));
         }
     }
-    processAABB(buf) {
-        throw new Error('To be overriden');
-    }
     // to be called by processAABB
     publishProperty(prop, value) {
         if (this.publishCache[prop] === value)
@@ -33,5 +31,21 @@ export default class AABBDevice extends HADevice {
     }
     getProperty(prop) {
         return this.publishCache[prop];
+    }
+    // Publish 'Off' to the stage property after a delay. If a Standby packet or
+    // a new active cycle arrives first, cancelOffTimer() prevents the publish.
+    scheduleOff(delayMs = 5 * 60 * 1000) {
+        if (this.offTimer !== null)
+            clearTimeout(this.offTimer);
+        this.offTimer = setTimeout(() => {
+            this.offTimer = null;
+            this.publishProperty('stage', 'Off');
+        }, delayMs);
+    }
+    cancelOffTimer() {
+        if (this.offTimer !== null) {
+            clearTimeout(this.offTimer);
+            this.offTimer = null;
+        }
     }
 }
