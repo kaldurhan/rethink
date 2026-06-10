@@ -131,7 +131,7 @@ export default class Device extends AABBDevice {
         this.offTimer = setTimeout(() => {
             this.offTimer = null;
             this.publishProperty('stage', 'Off');
-        }, 30 * 60 * 1000);
+        }, 5 * 60 * 1000);
     }
     cancelOffTimer() {
         if (this.offTimer !== null) {
@@ -281,6 +281,9 @@ export default class Device extends AABBDevice {
                 },
             },
         }));
+    }
+    start() {
+        this.publishProperty('stage', 'Off');
     }
     processAABB(inner) {
         if (inner.length < 11 || inner[0] !== 0x20)

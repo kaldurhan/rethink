@@ -255,11 +255,8 @@ export function app(ha, manager, bridge) {
                         return;
                     }
                     if (m === '_close') {
-                        broadcastCloud({ cloudStatus: 'reconnecting' });
+                        broadcastCloud({ cloudStatus: 'disconnected' });
                         cloudMqtt = undefined;
-                        // Short delay if we were connected (rate limit window likely passed);
-                        // ensureCloudConnected will enforce the cooldown if needed.
-                        setTimeout(ensureCloudConnected, didConnect ? 5000 : 2000);
                         return;
                     }
                     if (m === '_offline')
@@ -290,6 +287,24 @@ export function app(ha, manager, bridge) {
                 ws.send(JSON.stringify({ cloudStatus: 'idle' }));
                 ensureCloudConnected();
             }
+            ws.on('message', (data) => {
+                try {
+                    const msg = JSON.parse(String(data));
+                    if (msg.reconnect) {
+                        broadcastCloud({ cloudStatus: 'reconnecting' });
+                        const existing = cloudMqtt;
+                        cloudMqtt = undefined;
+                        cloudConnecting = false;
+                        if (existing)
+                            try {
+                                existing.end(true);
+                            }
+                            catch { }
+                        ensureCloudConnected();
+                    }
+                }
+                catch { }
+            });
             ws.on('close', () => {
                 cloudSubscribers = cloudSubscribers.filter((s) => s !== ws);
             });
@@ -333,6 +348,20 @@ export function app(ha, manager, bridge) {
         res.status(200).end();
         // Start the cloud MQTT connection now that credentials exist.
         ensureCloudConnected();
+    }));
+    // Trigger HA Supervisor addon store reload so the latest version is visible
+    // without requiring an HA restart. Call this once after a new release.
+    app.post('/supervisor/store-reload', asyncHandler(async (req, res) => {
+        const token = process.env.SUPERVISOR_TOKEN;
+        if (!token) {
+            res.status(503).end('Not running inside HA Supervisor');
+            return;
+        }
+        const r = await fetch('http://supervisor/store/reload', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        res.status(r.ok ? 200 : 502).end();
     }));
     // static pages
     app.use(WebSocketExpress.static(currentDir + '/../html', { extensions: ['html'] }));

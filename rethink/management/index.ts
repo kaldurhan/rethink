@@ -403,6 +403,24 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
         }),
     )
 
+    // Trigger HA Supervisor addon store reload so the latest version is visible
+    // without requiring an HA restart. Call this once after a new release.
+    app.post(
+        '/supervisor/store-reload',
+        asyncHandler(async (req, res) => {
+            const token = process.env.SUPERVISOR_TOKEN
+            if (!token) {
+                res.status(503).end('Not running inside HA Supervisor')
+                return
+            }
+            const r = await fetch('http://supervisor/store/reload', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            })
+            res.status(r.ok ? 200 : 502).end()
+        }),
+    )
+
     // static pages
     app.use(WebSocketExpress.static(currentDir + '/../html', { extensions: ['html'] }))
     return app.createServer()
