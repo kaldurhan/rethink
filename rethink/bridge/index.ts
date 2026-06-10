@@ -24,7 +24,8 @@ function isThinq1State(state: Thinq1DeviceState | Thinq2DeviceState): state is T
 
 type StatusCallback = (status: string) => void
 
-const RECONNECT_PERIOD = 5000
+const RECONNECT_MIN_MS = 5_000
+const RECONNECT_MAX_MS = 5 * 60_000
 
 class BridgedDevice {
     // upstream - our connection to the ThinQ cloud
@@ -38,7 +39,7 @@ class BridgedDevice {
         this.onDownstreamClose = () => this.destroy()
 
         if (this.upstream.platformType !== this.downstream.platform) {
-            console.warn("Bridge device types don't match")
+            log('bridge', "device types don't match — bridge not started")
             return
         }
 
@@ -52,6 +53,7 @@ class BridgedDevice {
     onDownstreamClose: () => void
 
     connection: Thinq1Connection | Thinq2Connection | undefined
+    private reconnectDelay = RECONNECT_MIN_MS
 
     reconnectNow() {
         const U = this.upstream
@@ -66,11 +68,16 @@ class BridgedDevice {
             this.connection = new Thinq2Connection(U)
             this.connection.on('data', (payload) => D.send_packet(payload))
         } else {
-            console.warn("Can't connect bridge")
+            log('bridge', "can't connect bridge — platform mismatch")
             return
         }
 
-        this.connection.on('close', () => this.disconnect())
+        const connectedAt = Date.now()
+        this.connection.on('close', () => {
+            // connection was stable — reset backoff so the next disconnect retries quickly
+            if (Date.now() - connectedAt > 30_000) this.reconnectDelay = RECONNECT_MIN_MS
+            this.disconnect()
+        })
         this.connection.on('error', (err) => log('bridge', `connection error: ${err}`))
     }
 
@@ -81,7 +88,10 @@ class BridgedDevice {
             this.connection.destroy()
             this.connection = undefined
             clearTimeout(this.reconnectTimeout)
-            this.reconnectTimeout = setTimeout(() => this.reconnectNow(), RECONNECT_PERIOD)
+            const jitter = 1 + (Math.random() * 0.4 - 0.2)
+            const delay = Math.min(this.reconnectDelay * jitter, RECONNECT_MAX_MS)
+            this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_MS)
+            this.reconnectTimeout = setTimeout(() => this.reconnectNow(), delay)
         }
     }
 

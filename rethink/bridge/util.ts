@@ -4,12 +4,13 @@ export function subprocess(command: string, args: string[], stdin: string = ''):
     return new Promise((resolve, reject) => {
         const subprocess = spawn(command, args)
         const out: Buffer[] = []
-        subprocess.stdout.on('data', (data: Buffer) => {
-            out.push(data)
-        })
+        const err: Buffer[] = []
+        subprocess.stdout.on('data', (data: Buffer) => out.push(data))
+        subprocess.stderr.on('data', (data: Buffer) => err.push(data))
         subprocess.on('close', (code) => {
             if (code !== 0) {
-                reject(new Error(`${command} exited with code ${code}`))
+                const stderr = Buffer.concat(err).toString('utf-8').trim()
+                reject(new Error(`${command} exited with code ${code}${stderr ? `: ${stderr}` : ''}`))
                 return
             }
             resolve(Buffer.concat(out).toString('utf-8'))

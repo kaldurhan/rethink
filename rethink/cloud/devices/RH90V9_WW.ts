@@ -4,6 +4,7 @@ import { type Connection } from '../homeassistant'
 import { type Metadata } from '../thinq'
 import { allowExtendedType } from '@/util/casting'
 import AABBDevice from './aabb_device'
+import log from '@/util/logging'
 
 // ─── Lookup tables ─────────────────────────────────────────────────────────────
 // All indices sourced from official modelJson MonitoringValue unless noted.
@@ -668,13 +669,15 @@ export default class Device extends AABBDevice {
             if (schema.dryLevels.length === 0) {
                 effectiveDryLevel = 0
             } else if (!schema.dryLevels.includes(effectiveDryLevel)) {
-                console.warn(
+                log(
+                    'status',
                     `[RH90V9] dry_level ${DRY_LEVELS[effectiveDryLevel] ?? effectiveDryLevel} invalid for ${CYCLES[cycleId]}, correcting to default`,
                 )
                 effectiveDryLevel = schema.defaultDryLevel
             }
             if (!schema.ecoHybrids.includes(effectiveEcoHybrid)) {
-                console.warn(
+                log(
+                    'status',
                     `[RH90V9] eco_hybrid ${ECO_HYBRID[effectiveEcoHybrid] ?? effectiveEcoHybrid} invalid for ${CYCLES[cycleId]}, correcting to default`,
                 )
                 effectiveEcoHybrid = schema.defaultEcoHybrid
@@ -712,14 +715,15 @@ export default class Device extends AABBDevice {
                 // the firmware safety gate that blocks remote power on after ~3-5min idle.
                 const wake = this.lastDownloadedCycleId ? this.buildF025(this.lastDownloadedCycleId) : null
                 if (wake) {
-                    console.log(
+                    log(
+                        'status',
                         `[RH90V9] Sending wake (F0 25 with 0x${this.lastDownloadedCycleId.toString(16)}) before power on`,
                     )
                     this.send(wake)
                     setTimeout(() => this.send(Buffer.from('F02A0100', 'hex')), 500)
                 } else {
                     // No downloaded cycle known — send power on directly (may fail if idle)
-                    console.warn('[RH90V9] No downloaded cycle known for wake sequence — sending F0 2A directly')
+                    log('status', '[RH90V9] No downloaded cycle known for wake sequence — sending F0 2A directly')
                     this.send(Buffer.from('F02A0100', 'hex'))
                 }
             } else if (mqttValue === 'OFF') {
@@ -731,7 +735,7 @@ export default class Device extends AABBDevice {
         // Poll (Debug) — sends F0 ED handshake, wakes dryer if polling has stalled
         // Dryer replies with 30 EB compact state snapshot (logged by rethink)
         if (prop === 'ping') {
-            console.log('[RH90V9] Sending poll (F0 ED handshake)')
+            log('status', '[RH90V9] Sending poll (F0 ED handshake)')
             this.send(Buffer.from('F0ED1121010000001804131400005a', 'hex'))
             return
         }
@@ -761,17 +765,17 @@ export default class Device extends AABBDevice {
                     if (payload.cycle !== undefined) {
                         const id = CYCLE_IDS[payload.cycle as string]
                         if (id !== undefined) cycleId = id
-                        else console.warn(`[RH90V9] Unknown cycle '${payload.cycle}' in start payload`)
+                        else log('status', `[RH90V9] Unknown cycle '${payload.cycle}' in start payload`)
                     }
                     if (payload.dry_level !== undefined) {
                         const id = DRY_LEVEL_IDS[payload.dry_level as string]
                         if (id !== undefined) dryLevel = id
-                        else console.warn(`[RH90V9] Unknown dry_level '${payload.dry_level}' in start payload`)
+                        else log('status', `[RH90V9] Unknown dry_level '${payload.dry_level}' in start payload`)
                     }
                     if (payload.eco_hybrid !== undefined) {
                         const id = ECO_HYBRID_IDS[payload.eco_hybrid as string]
                         if (id !== undefined) ecoHybrid = id
-                        else console.warn(`[RH90V9] Unknown eco_hybrid '${payload.eco_hybrid}' in start payload`)
+                        else log('status', `[RH90V9] Unknown eco_hybrid '${payload.eco_hybrid}' in start payload`)
                     }
                     if (payload.anti_crease !== undefined) {
                         antiCrease = Boolean(payload.anti_crease)
@@ -779,15 +783,15 @@ export default class Device extends AABBDevice {
                     if (payload.reservation !== undefined) {
                         const id = RESERVATION_IDS[payload.reservation as string]
                         if (id !== undefined) reservation = id
-                        else console.warn(`[RH90V9] Unknown reservation '${payload.reservation}' in start payload`)
+                        else log('status', `[RH90V9] Unknown reservation '${payload.reservation}' in start payload`)
                     }
                 } catch {
-                    console.warn('[RH90V9] start payload is not valid JSON — using last known Bd values')
+                    log('status', '[RH90V9] start payload is not valid JSON — using last known Bd values')
                 }
             }
 
             if (cycleId < 2) {
-                console.warn('[RH90V9] Start ignored: no cycle known')
+                log('status', '[RH90V9] Start ignored: no cycle known')
                 return
             }
 

@@ -15,18 +15,20 @@ import log from '../util/logging.js';
 function isThinq1State(state) {
     return 'rtiServer' in state;
 }
-const RECONNECT_PERIOD = 5000;
+const RECONNECT_MIN_MS = 5_000;
+const RECONNECT_MAX_MS = 5 * 60_000;
 class BridgedDevice {
     // upstream - our connection to the ThinQ cloud
     // downstream - the physical device
     constructor(upstream, downstream) {
         this.upstream = upstream;
         this.downstream = downstream;
+        this.reconnectDelay = RECONNECT_MIN_MS;
         // we create the functions at runtime so that they have unique identities that can be removed with removeListener
         this.onDownstreamData = (packet) => this.connection?.send(packet);
         this.onDownstreamClose = () => this.destroy();
         if (this.upstream.platformType !== this.downstream.platform) {
-            console.warn("Bridge device types don't match");
+            log('bridge', "device types don't match — bridge not started");
             return;
         }
         downstream.on('data', this.onDownstreamData);
@@ -48,10 +50,16 @@ class BridgedDevice {
             this.connection.on('data', (payload) => D.send_packet(payload));
         }
         else {
-            console.warn("Can't connect bridge");
+            log('bridge', "can't connect bridge — platform mismatch");
             return;
         }
-        this.connection.on('close', () => this.disconnect());
+        const connectedAt = Date.now();
+        this.connection.on('close', () => {
+            // connection was stable — reset backoff so the next disconnect retries quickly
+            if (Date.now() - connectedAt > 30_000)
+                this.reconnectDelay = RECONNECT_MIN_MS;
+            this.disconnect();
+        });
         this.connection.on('error', (err) => log('bridge', `connection error: ${err}`));
     }
     disconnect() {
@@ -59,7 +67,10 @@ class BridgedDevice {
             this.connection.destroy();
             this.connection = undefined;
             clearTimeout(this.reconnectTimeout);
-            this.reconnectTimeout = setTimeout(() => this.reconnectNow(), RECONNECT_PERIOD);
+            const jitter = 1 + (Math.random() * 0.4 - 0.2);
+            const delay = Math.min(this.reconnectDelay * jitter, RECONNECT_MAX_MS);
+            this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_MS);
+            this.reconnectTimeout = setTimeout(() => this.reconnectNow(), delay);
         }
     }
     destroy() {

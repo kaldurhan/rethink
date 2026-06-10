@@ -134,6 +134,19 @@ async function main() {
     }
     if (config.management_port)
         Management.app(ha, manager, bridge).listen(config.management_port);
+    // Graceful shutdown: explicitly publish offline so HA sees the state change
+    // immediately. The LWT only fires on abrupt disconnect, not on clean end().
+    function shutdown(signal) {
+        log('status', `Received ${signal}, shutting down`);
+        if (ha.HA.isConnected) {
+            ha.HA.client.publish(config.homeassistant.rethink_prefix + '/availability', Buffer.from('offline'), { retain: true }, () => ha.HA.client.end());
+        }
+        else {
+            ha.HA.client.end();
+        }
+    }
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
     console.log('Rethink cloud ready');
 }
 main().catch((err) => {
