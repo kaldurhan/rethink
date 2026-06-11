@@ -109,12 +109,13 @@ describe(MODEL_ID, () => {
     test('locator rejects sub-block candidates with absurd remaining time (Guard A)', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', MISPICK_114_QUICK14)
-        // Mis-pick published 'Allergivård' before the guard. The recovered
-        // true block (cs=0x4b, disp=(00,00)) is still display-tuple
-        // suppressed until the activity-code rework lands — Task 3
-        // strengthens this assertion to course === 'Quick 14'.
-        assert.notEqual(ha.devices[DEVICE_ID].properties.course, 'Allergivård')
-        assert.notEqual(ha.devices[DEVICE_ID].properties.remaining_time, 2304)
+        // Mis-pick published 'Allergivård' before the guard; the recovered
+        // true block (cs=0x4b, act=(0e,0c) → Spinning) flows since the
+        // activity-code rework.
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.course, 'Quick 14')
+        assert.equal(p.cycle_phase, 'Spinning')
+        assert.equal(p.remaining_time, 4)
     })
 
     // Captured live 2026-06-11 11:51:12 mid-Eco — same 114-byte variant,
@@ -167,36 +168,78 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
-    test('cycle_phase WashTumble + remaining_time decode when not Idle', () => {
+    test('cycle_phase Washing + remaining_time decode from activity code', () => {
         const { ha, thinq } = makeDevice()
-        // WashTumble = 0x0b10. remaining = 0x05 + (0x00<<8) = 5 minutes.
+        // synthFrame default act=[0x0b, 0x26] → Washing. Display tuple
+        // (0x0b,0x10) is ignored by the new decoder.
         thinq.emit('data', synthFrame(0x0b, 0x10, 0x06, 0x2b, 0x05, 0x00))
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.cycle_phase, 'WashTumble')
+        assert.equal(p.cycle_phase, 'Washing')
         assert.equal(p.remaining_time, 5)
-        // temp must NOT be published when phase != Idle.
+        // temp must NOT be published when display phase != Idle.
         assert.equal(p.temp, undefined)
     })
 
-    test('cycle_phase SpinRamp range (sub[1]=0x18, sub[2] in 0x12..0x1f)', () => {
+    test('display tuple no longer drives cycle_phase (activity wins)', () => {
         const { ha, thinq } = makeDevice()
+        // Display tuple says SpinRamp-range (0x18,0x15); activity says Washing.
         thinq.emit('data', synthFrame(0x18, 0x15, 0x06, 0x2b, 0x02, 0x00))
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'SpinRamp')
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Washing')
     })
 
-    test('cycle_phase Finished (0x100e) with ST=Running is suppressed — same as 0x0000', () => {
-        // 0x100e appears at end-of-cycle rinse→drain transition (confirmed from capture).
-        // ST=Running + phase=Finished is always post-cycle — suppress so End stays visible.
+    test('post-cycle tumble block (act 0x10) is passive: keeps run_state, publishes Finished', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', synthFrame(0x10, 0x0e, 0x06, 0x2b, 0x00, 0x00))
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, undefined)
-        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
+        thinq.emit('data', synthFrame(0x10, 0x0e, 0x06, 0x2b, 0x00, 0x00, [0x10, 0x0e]))
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Finished')
+        // passive block must not claim Running (fresh cache → Standby fallback)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
     })
 
-    test('cycle_phase unknown for unrecognized tuple', () => {
+    test('post-cycle idle block (act 0x00) is passive: publishes Idle', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', synthFrame(0xff, 0xff, 0x06, 0x2b, 0x00, 0x00))
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'unknown')
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x06, 0x2b, 0x00, 0x00, [0x00, 0x10]))
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Idle')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
+
+    test('unknown activity code keeps last cycle_phase and logs once', (t) => {
+        const spy = captureLog(t)
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x03, 0x0e, 0x09, 0x13, 0x67, 0x00)) // Washing
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Washing')
+        thinq.emit('data', synthFrame(0x03, 0x0e, 0x09, 0x13, 0x66, 0x00, [0x55, 0x0b]))
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Washing')
+        const logged = spy.mock.calls.map((c) => c.arguments.join(' ')).join('\n')
+        assert.match(logged, /0x55/)
+    })
+
+    // Captured live 2026-06-11 (Quick 14 validated cycle): act=(0c,0b)
+    // rinse block at rem=9 and act=(0e,0c) spin block at rem=5. The spin
+    // block carries disp=(00,00) — the tuple the old code treated as
+    // post-cycle Finished, which froze remaining_time during every final
+    // spin.
+    const RINSING_QUICK14 = buf(
+        'aaff200a007600252b000100ec006400000010014b00000000000000000c00160023004b0c0b000900000308040100755a2000001001041800000000000004000000000010014b00000000000000000900160024004b0c0b000900000308040100755a200000100104180000000000000400006112bb',
+    )
+    const SPINNING_QUICK14 = buf(
+        'aaff200a0076002531000100ec006400000010014b00000000000000000700160026004b0c0b000900000308040100755a2000001001041800000000000004000000000000014b00000000000000000500160026004b0e0c000900000308040100755a200000100104180000000000000400009c79bb',
+    )
+
+    test('live spin packets flow: Running, Spinning, remaining_time updates (was suppressed)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', RINSING_QUICK14)
+        let p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.cycle_phase, 'Rinsing')
+        assert.equal(p.run_state, 'Running')
+        assert.equal(p.remaining_time, 9)
+        thinq.emit('data', SPINNING_QUICK14)
+        p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.cycle_phase, 'Spinning')
+        assert.equal(p.run_state, 'Running')
+        assert.equal(p.remaining_time, 5)
+        assert.equal(p.course, 'Quick 14')
     })
 
     test('unknown course byte → course publishes enum-safe "unknown", raw byte goes to log', (t) => {
@@ -217,14 +260,6 @@ describe(MODEL_ID, () => {
         thinq.emit('data', synthFrame(0x05, 0x10, 0x06, 0x99, 0x00, 0x00))
         const hits = spy.mock.calls.filter((c) => c.arguments.join(' ').includes('0x99'))
         assert.equal(hits.length, 1)
-    })
-
-    test('unrecognized phase tuple logs raw bytes for future decoding', (t) => {
-        const spy = captureLog(t)
-        const { thinq } = makeDevice()
-        thinq.emit('data', synthFrame(0xff, 0xfe, 0x06, 0x2b, 0x00, 0x00))
-        const logged = spy.mock.calls.map((c) => c.arguments.join(' ')).join('\n')
-        assert.match(logged, /\(ff fe\)/)
     })
 
     // ── Pause (captured 2026-06-11, correlated with cloud state PAUSE) ──────
@@ -322,12 +357,18 @@ describe(MODEL_ID, () => {
         assert.ok(msOptions.includes('AntiCrease'))
         assert.ok(!msOptions.includes('DisplayOn'), 'DisplayOn must not appear in options')
         assert.ok(!msOptions.includes('Weighing'), 'Weighing must not appear — 0x04 is End')
-        // cycle_phase enum must include SpinRamp (range-based, not in the static map).
+        // cycle_phase enum: the coarse activity-code vocabulary (2026-06-11 spec).
         const cpOptions = components.cycle_phase.options as string[]
-        assert.ok(cpOptions.includes('SpinRamp'))
-        assert.ok(cpOptions.includes('Tumble'))
-        assert.ok(cpOptions.includes('Drain'))
-        assert.ok(cpOptions.includes('Finished'))
+        assert.deepEqual(cpOptions, [
+            'Idle',
+            'Detecting',
+            'Filling',
+            'Washing',
+            'Rinsing',
+            'Spinning',
+            'Finished',
+            'unknown',
+        ])
         // spin uses rpm; time sensors use min; water_temp uses °C.
         assert.equal(components.spin.unit_of_measurement, 'rpm')
         assert.equal(components.remaining_time.unit_of_measurement, 'min')
@@ -364,7 +405,9 @@ describe(MODEL_ID, () => {
         thinq.emit('data', TURBOWASH_RUNNING_1MIN)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'Running')
-        assert.equal(p.cycle_phase, 'Idle')
+        // act=(0b,26) → Washing. The old display decode said 'Idle' 1 min
+        // into an active cycle — wrong.
+        assert.equal(p.cycle_phase, 'Washing')
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
         assert.equal(p.remaining_time, 55)
@@ -389,12 +432,12 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
-    test('0x00-variant active phase (0x0010) decodes run_state=Running, phase=Tumble, remaining_time', () => {
+    test('0x00-variant active block decodes run_state=Running, phase from act=(0c,..)=Rinsing, remaining_time', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_TUMBLE)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'Running')
-        assert.equal(p.cycle_phase, 'Tumble')
+        assert.equal(p.cycle_phase, 'Rinsing')
         assert.equal(p.course, 'Turbowash 39')
         assert.equal(p.spin, 800)
         assert.equal(p.remaining_time, 28)
@@ -427,15 +470,15 @@ describe(MODEL_ID, () => {
         assert.equal(p.temp, '40')
     })
 
-    test('post-cycle tumble (Running phase=0x0000) is suppressed — End state preserved', () => {
+    test('post-cycle tumble (act 0x10) is passive — End state preserved', () => {
         const { ha, thinq } = makeDevice()
         // Put device into End state first
-        const endFrame = synthFrame(0x10, 0x0e, 0x06, 0x2b, 0x00, 0x00)
+        const endFrame = synthFrame(0x10, 0x0e, 0x06, 0x2b, 0x00, 0x00, [0x10, 0x0e])
         endFrame[12] = 0x04 // inner[10] = ST=End
         thinq.emit('data', endFrame)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
-        // Post-cycle tumble: ST=Running, phase=(0x00,0x00) = Finished
-        const tumbleFrame = synthFrame(0x00, 0x00, 0x06, 0x2b, 0x00, 0x00)
+        // Post-cycle tumble: ST=Running, act 0x10 (anti-wrinkle tumble)
+        const tumbleFrame = synthFrame(0x00, 0x00, 0x06, 0x2b, 0x00, 0x00, [0x10, 0x0e])
         thinq.emit('data', tumbleFrame)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
     })
@@ -571,16 +614,16 @@ describe(MODEL_ID, () => {
         assert.equal(p.cycle_phase, undefined)
     })
 
-    test('anti-crease packet (ST=0xe2) → run_state=AntiCrease, phase=Idle', () => {
+    test('anti-crease packet (ST=0xe2) → run_state=AntiCrease, phase=Finished', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', ANTI_CREASE_END)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'AntiCrease')
-        assert.equal(p.cycle_phase, 'Idle')
+        assert.equal(p.cycle_phase, 'Finished')
         assert.equal(p.course, 'Blandmaterial')
     })
 
-    test('post-cycle Running packet (phA=0x00, phB=0x00) is suppressed — prior state preserved', () => {
+    test('post-cycle Running packet (act 0x10) is passive — End preserved, phase=Finished', () => {
         const { ha, thinq } = makeDevice()
         // Establish End state first, then send the post-cycle tumble packet
         thinq.emit('data', END_OF_CYCLE)
@@ -588,7 +631,7 @@ describe(MODEL_ID, () => {
         thinq.emit('data', RUNNING_FINISHED)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'End')
-        assert.equal(p.cycle_phase, undefined)
+        assert.equal(p.cycle_phase, 'Finished')
     })
 
     // Running packet where last sub-block has phase=0x100e (Finished), confirmed from
@@ -598,14 +641,14 @@ describe(MODEL_ID, () => {
         'aaff200a0076000707000100ec006400000000062b000000000000000001005d0145002b0e0c00010000031c040101755a200000100104180000000000000400000000100e062b000000000000000001005d0146002b100e00010000031c040101755a20000010010418000000000000040000d822bb',
     )
 
-    test('post-cycle Running packet (phA=0x10, phB=0x0e = 0x100e) is suppressed — End state preserved', () => {
+    test('post-cycle Running packet (disp 0x100e, act 0x10) is passive — End preserved, phase=Finished', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', END_OF_CYCLE)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
         thinq.emit('data', RUNNING_FINISHED_100E)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'End')
-        assert.equal(p.cycle_phase, undefined)
+        assert.equal(p.cycle_phase, 'Finished')
     })
 
     test('End state publishes remaining_time=0 (so done-timeout fires after 30 min)', () => {
@@ -650,7 +693,7 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
         thinq.emit('data', PERIODIC_8A)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Idle')
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Washing')
     })
 
     // Real captured 0x53 motor-ramp packet from 13:39:01 (rinse-tumble start).
@@ -660,12 +703,13 @@ describe(MODEL_ID, () => {
         'aaff200a0053001a83000201030018120e01021200dd00f50c00360000000000000000000000000001050025564344574c325145554b0000000000000000000000000102c0220b8b010700000000000000000000c500bb',
     )
 
-    test('0x53 publishes SpinRamp when no 0x76 seen yet (cold-start / final spin)', () => {
+    test('0x53 final-spin ramp drives stage only — cycle_phase untouched', () => {
         const { ha, thinq, dev } = makeDevice()
-        // lastTumbleTime=0 by default → >90s since last tumble → SpinRamp fires.
+        // lastTumbleTime=0 by default → >90s since last tumble → spinPhase fires.
         assert.equal(dev.lastTumbleTime, 0)
         thinq.emit('data', MOTOR_RAMP_53)
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'SpinRamp')
+        // cycle_phase comes from the 0x76 activity codes, not the ramp packet.
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, undefined)
     })
 
     test('0x53 is suppressed when 0x76 was recent (<90 s)', () => {
@@ -735,12 +779,14 @@ describe(MODEL_ID, () => {
         'aaff200a00760005cd000100ec006400050310062b000000000000000054005d00a2002b0b2600010000031c040101755a2000001001041800000000000004000000050310062b000000000000000053005d00c2002b0b2600010000031c040101755a20000010010418000000000000040000825ebb',
     )
 
-    test('50-byte 0x05-variant (pre-wash Running) → run_state=Running, phase=Idle, remaining_time=83', () => {
+    test('50-byte 0x05-variant (pre-wash Running) → run_state=Running, phase=Washing, remaining_time=83', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', BLANDMATERIAL_PRESTART)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'Running')
-        assert.equal(p.cycle_phase, 'Idle')
+        // act=(0b,26) → Washing (the old display decode said 'Idle' while
+        // the drum was already filling/tumbling)
+        assert.equal(p.cycle_phase, 'Washing')
         assert.equal(p.course, 'Blandmaterial')
         assert.equal(p.spin, 400)
         assert.equal(p.remaining_time, 83)
@@ -767,11 +813,13 @@ describe(MODEL_ID, () => {
         return Buffer.concat([Buffer.from([0xaa, 0xff]), inner, Buffer.from([0x00, 0xbb])])
     }
 
-    test('phase 0x0006 (Drain) decodes correctly', () => {
+    test('0x03-variant block with old Drain display tuple (0x0006) decodes activity Washing', () => {
+        // The display tuple 0x0006 was once mapped to 'Drain'; activity codes
+        // are authoritative now (synthFrame03 hardcodes act 0x0b).
         const { ha, thinq } = makeDevice()
         thinq.emit('data', synthFrame03(0x00, 0x06, 0x01, 0x2b, 0x05, 0x00))
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.cycle_phase, 'Drain')
+        assert.equal(p.cycle_phase, 'Washing')
         assert.equal(p.remaining_time, 5)
     })
 

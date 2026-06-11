@@ -65,43 +65,52 @@ const SPINS_VCDWL: Record<number, number> = {
     0x27: 0, // seen in Blandmaterial final spin; actual RPM unconfirmed
 }
 
-// (sub[1] << 8) | sub[2] — cycle phase. Multiple equivalent encodings
-// per phase per the wiki notes.
-const PHASES_VCDWL: Record<number, string> = {
-    0x0000: 'Finished', // post-cycle Running packets: phA=0x00, phB=0x00
-    0x0210: 'Idle', // 20-30°C settled (scroll series: 0x0110→0x0210→0x0310→0x0510)
-    0x0310: 'Idle',
-    0x0510: 'Idle',
-    0x0810: 'Idle',
-    0x0110: 'WashFill',
-    0x0b10: 'WashTumble',
-    0x260b: 'WashDrain',
-    0x0b26: 'WashDrain',
-    0x0010: 'Tumble', // active tumbling — appears in both wash and rinse phases
-    0x0006: 'Drain', // end-of-cycle drain observed in Blandmaterial captures
-    0x040e: 'RinseFill',
-    0x060e: 'RinseTumble',
-    0x0e0c: 'RinseDrain',
-    0x0c0e: 'RinseDrain',
-    0x080e: 'SpinActive',
-    0x0a0e: 'SpinActive',
-    0x100e: 'Finished',
-    // 0x_0e variants observed in programme-selection sub-blocks (machine idle, user browsing).
-    // These share the low byte 0x0e with the operational rinse/spin phases above but are
-    // distinct codes that only appear while the drum is not running.
-    // phA encodes the temperature index (same as TEMPERATURES_VCDWL keys).
-    0x010e: 'Idle',
-    0x020e: 'Idle',
-    0x030e: 'Idle',
-    0x050e: 'Idle',
-    // 0x0610: settled-display at TEMP_95 (phA=0x06, phB=0x10). Added 2026-06-11.
-    0x0610: 'Idle', // TEMP_95 settled
+// (sub[1] << 8) | sub[2] — display tuple. Only used to gate temperature
+// publishing: these codes mean "panel idle / settled display", where
+// sub[1] carries the temperature index. The tuple is NOT a cycle phase —
+// it freezes for entire cycles (2026-06-11 spec).
+const DISPLAY_IDLE_VCDWL = new Set([
+    // settled temp displays (0x0110 is the scroll-in-progress code — temp
+    // must NOT publish until the display settles, hence excluded)
+    0x0210,
+    0x0310,
+    0x0510,
+    0x0810,
+    0x0610,
+    0x010e,
+    0x020e,
+    0x030e,
+    0x050e, // programme-selection browsing
+])
+
+// sub[20] — drum-activity / block-type code; sub[21] echoes the previous
+// code. Milestone sequence confirmed across Eco 40-60 + Quick 14
+// (2026-06-11): 01(selected) → 03 → 26 → 02 → 0b(wash, 26↔0b refills)
+// → 0c(rinse) → 0e(drain+spin) → 10(finished) → 00(post-cycle idle).
+// 03/26/02 labels are best-guess — confirm against the next live cycle.
+const ACTIVITY_VCDWL: Record<number, string> = {
+    0x00: 'Idle',
+    0x01: 'Idle',
+    0x03: 'Detecting',
+    0x26: 'Filling',
+    0x02: 'Washing',
+    0x0b: 'Washing',
+    0x0c: 'Rinsing',
+    0x0e: 'Spinning',
+    0x10: 'Finished',
 }
 
-function decodePhase(phA: number, phB: number): string {
-    if (phA === 0x18 && phB >= 0x12 && phB <= 0x1f) return 'SpinRamp'
-    return PHASES_VCDWL[(phA << 8) | phB] ?? 'unknown'
-}
+// Activity codes during which the drum tumbles — the only ones that may
+// refresh lastTumbleTime (the 0x53 final-spin gate depends on tumble
+// silence; spin packets must not reset it).
+const TUMBLE_ACTIVITY = new Set([0x03, 0x26, 0x02, 0x0b, 0x0c])
+
+// Passive blocks: drum not actively cycling. 0x01 = programme selection /
+// temp scroll, 0x10 = post-cycle anti-wrinkle tumble, 0x00 = post-cycle
+// idle. While ST=0xec these must not claim Running or start the stage
+// machine. (Replaces the old display-tuple Finished suppression, which
+// also ate LIVE final-spin packets — they share disp=(00,00).)
+const PASSIVE_ACTIVITY = new Set([0x00, 0x01, 0x10])
 
 /**
  * Find the last 10 08 energy-tracking block in the inner buffer.
@@ -172,26 +181,12 @@ export default class Device extends AABBDevice {
     // seconds, so without this gate an unknown code floods the add-on log.
     private loggedUnknownCourse = -1
     private loggedMispickCourse = -1
-    private loggedUnknownPhase = -1
+    private loggedUnknownActivity = -1
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
         const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown']
-        const phaseOptions = [
-            'Idle',
-            'WashFill',
-            'WashTumble',
-            'WashDrain',
-            'Tumble',
-            'Drain',
-            'RinseFill',
-            'RinseTumble',
-            'RinseDrain',
-            'SpinRamp',
-            'SpinActive',
-            'Finished',
-            'unknown',
-        ]
+        const phaseOptions = ['Idle', 'Detecting', 'Filling', 'Washing', 'Rinsing', 'Spinning', 'Finished', 'unknown']
         this.setConfig({
             ...HADevice.config(meta, { name: 'LG F4X7511TWS' }),
             components: {
@@ -343,14 +338,15 @@ export default class Device extends AABBDevice {
         // 0x53: motor-controller ramp packet. inner[12]=0x18 (motor active),
         // inner[13]=speed step 0x12..0x1f. Fires concurrently with 0x76 during
         // tumble AND exclusively during the final drain+spin (0x76 absent for 15+
-        // min). Only publish SpinRamp when 0x76 has been silent for >90 s so we
-        // don't override the Tumble phase during gentle agitation.
+        // min). The >90 s tumble-silence gate distinguishes the final spin
+        // (stage spinPhase) from intermediate ramps (first one = rinse began).
+        // cycle_phase itself is published from the activity codes in the 0x76
+        // path — this packet only drives stage events.
         if (packetType === 0x53) {
             const isActiveSpin = inner.length >= 14 && inner[12] === 0x18 && inner[13] >= 0x12 && inner[13] <= 0x1f
             if (isActiveSpin) {
                 const isFinalSpin = Date.now() - this.lastTumbleTime > 90000
                 if (isFinalSpin) {
-                    this.publishProperty('cycle_phase', 'SpinRamp')
                     this.stageFsm!.dispatch('spinPhase')
                 } else {
                     // Intermediate spin ramp during wash/rinse tumble
@@ -386,21 +382,15 @@ export default class Device extends AABBDevice {
         const subStart = inner.length >= 32 ? findStatusSubBlock(inner) : -1
         const sub = subStart >= 0 ? inner.subarray(subStart, subStart + 21) : null
 
-        // ST=0xec also broadcasts while a programme is merely selected on the
-        // panel (drum off). Selection blocks end in the terminator (01,00) at
-        // sub[20..21]; running blocks carry drum-activity codes there. Short
-        // packets (no sub-block) only occur mid-cycle.
-        const isSelectionBlock =
-            st === 0xec && sub !== null && inner[subStart + 20] === 0x01 && inner[subStart + 21] === 0x00
+        // Passive blocks (selection / post-cycle, see PASSIVE_ACTIVITY) must
+        // not claim Running or start the stage machine; their course/phase
+        // still publish below. Short packets (no sub-block) only occur
+        // mid-cycle. (Replaces the old display-tuple Finished suppression —
+        // disp=(00,00) also appears on LIVE final-spin packets, so keying on
+        // it froze remaining_time/run_state through every spin.)
+        const isPassiveBlock = st === 0xec && sub !== null && PASSIVE_ACTIVITY.has(sub[20])
 
-        // Post-cycle: ST=Running but phase=Finished (0x0000 or 0x100e both
-        // observed; terminator (10,0e)). Suppress so End/AntiCrease stays
-        // visible in HA. Selection blocks are exempt: courses without a
-        // temperature (Centrifugering, disp=(00,00)) collide with the
-        // Finished display tuple while browsing (live 2026-06-11 knob scroll).
-        if (st === 0xec && sub && !isSelectionBlock && decodePhase(sub[1], sub[2]) === 'Finished') return
-
-        if (st !== 0xeb && !isSelectionBlock) {
+        if (st !== 0xeb && !isPassiveBlock) {
             this.publishProperty('run_state', stateLabel)
             if (st === 0xec) this.stageFsm!.dispatch('cycleActive')
             if (st === 0x04 || st === 0xe2) this.stageFsm!.dispatch('ended')
@@ -448,16 +438,24 @@ export default class Device extends AABBDevice {
             return
         }
 
-        const phase = decodePhase(sub[1], sub[2])
-        if (phase === 'unknown') {
-            const tuple = (sub[1] << 8) | sub[2]
-            if (tuple !== this.loggedUnknownPhase) {
-                log('status', this.id, `unknown phase tuple (${sub[1].toString(16)} ${sub[2].toString(16)})`)
-                this.loggedUnknownPhase = tuple
+        // cycle_phase from the drum-activity code (2026-06-11 spec). The
+        // display tuple sub[1..2] freezes for whole cycles and is only used
+        // for the temperature gate below.
+        if (st === 0xe2) {
+            this.publishProperty('cycle_phase', 'Finished')
+        } else {
+            const activity = ACTIVITY_VCDWL[sub[20]]
+            if (activity !== undefined) {
+                this.publishProperty('cycle_phase', activity)
+            } else if (sub[20] !== this.loggedUnknownActivity) {
+                log('status', this.id, `unknown activity code 0x${sub[20].toString(16).padStart(2, '0')}`)
+                this.loggedUnknownActivity = sub[20]
             }
         }
-        this.publishProperty('cycle_phase', phase)
-        this.lastTumbleTime = Date.now()
+        // Only tumble-class activity refreshes the tumble timestamp — the
+        // 0x53 final-spin gate ("no 0x76 tumble for >90 s") depends on spin
+        // packets NOT resetting it.
+        if (TUMBLE_ACTIVITY.has(sub[20])) this.lastTumbleTime = Date.now()
 
         const sp = sub[3]
         this.publishProperty('spin', SPINS_VCDWL[sp] ?? 0)
@@ -472,11 +470,11 @@ export default class Device extends AABBDevice {
         // rejected by HA's enum validation.
         this.publishProperty('course', courseLabel ?? 'unknown')
 
-        // sub[20] is the terminator byte: 0x01 for temp-scroll sub-blocks (21 bytes),
-        // 0x0b for active-running sub-blocks (50 bytes). Both have cs-repeat at sub[19].
-        // Only publish temp when it's a temp-scroll sub-block in Idle phase.
+        // Only publish temp from temp-scroll sub-blocks (marker 0x05,
+        // selection activity 0x01) whose display tuple is a settled/browse
+        // code — there sub[1] carries the temperature index.
         const subMarker = inner[subStart]
-        if (subMarker === 0x05 && sub[20] === 0x01 && phase === 'Idle') {
+        if (subMarker === 0x05 && sub[20] === 0x01 && DISPLAY_IDLE_VCDWL.has((sub[1] << 8) | sub[2])) {
             this.publishProperty('temp', TEMPERATURES_VCDWL[sub[1]] ?? 'unknown')
         } else if (st === 0xec) {
             const remaining = sub[13] | (sub[14] << 8)
