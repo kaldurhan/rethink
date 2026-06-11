@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import type { TestContext } from 'node:test'
 import { setFilter } from '@/util/logging'
 import type { Connection, DeviceDiscovery } from '@/cloud/homeassistant'
 import type { Metadata } from '@/cloud/thinq'
@@ -10,6 +11,15 @@ import assert from 'node:assert/strict'
 
 // Suppress device logging noise during tests. Imported for side effect.
 setFilter(() => false)
+
+// Re-enable device logging for tests that assert on log output; suppression
+// is restored after the test. Returns a console.log spy.
+export function captureLog(t: TestContext) {
+    const spy = t.mock.method(console, 'log')
+    setFilter(() => true)
+    t.after(() => setFilter(() => false))
+    return spy
+}
 
 export type DeviceInfo = {
     config?: DeviceDiscovery

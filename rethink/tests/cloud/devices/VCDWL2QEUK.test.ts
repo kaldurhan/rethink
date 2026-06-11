@@ -1,18 +1,8 @@
-import { describe, test, type TestContext } from 'node:test'
+import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import DUT from '@/cloud/devices/VCDWL2QEUK'
 import type { Metadata } from '@/cloud/thinq'
-import { MockHAConnection, MockThinq2Device, buf } from '@/tests/helpers/mocks'
-import { setFilter } from '@/util/logging'
-
-// mocks.ts suppresses all device logging; re-enable it for tests that assert
-// on log output, restoring suppression afterwards.
-function captureLog(t: TestContext) {
-    const spy = t.mock.method(console, 'log')
-    setFilter(() => true)
-    t.after(() => setFilter(() => false))
-    return spy
-}
+import { MockHAConnection, MockThinq2Device, buf, captureLog } from '@/tests/helpers/mocks'
 
 const DEVICE_ID = 'test-id'
 const MODEL_ID = 'VCDWL2QEUK'
