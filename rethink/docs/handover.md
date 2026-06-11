@@ -8,7 +8,7 @@ A fork of [anszom/rethink](https://github.com/anszom/rethink) — a local protoc
 **Working directory (WSL):** `/home/zorgin/project/rethink/rethink`  
 **HA addon slug:** `rethink` (store slug `daf7d2b6_rethink`)  
 **GHCR image:** `ghcr.io/kaldurhan/rethink`  
-**Deployed version:** 1.0.61 (2026-06-11)
+**Deployed version:** 1.0.62 (2026-06-11)
 
 ---
 
@@ -134,8 +134,14 @@ course) — worth a guard during the rework.
   door-open capture of the WASHER.
 - Washer FINISH doesn't subtract a still-open pause if the cycle ends while
   Paused (dryer handles this; washer accuracy nit).
-- Dryer course `0x21` "Auto Dry" name unconfirmed; drying_mode fixtures still
-  synthetic.
+- ~~Dryer course 0x21 name~~ RESOLVED 2026-06-11: full programme-knob scrolls
+  on both machines, cloud-correlated live (capture
+  `program-scroll-2026-06-11-*` in `/home/zorgin/rethink-captures/`). All
+  15 washer + 13 dryer panel courses byte-validated; washer gained
+  0x37 Sköljning+Centrifugering / 0x4e Centrifugering; the dryer table had
+  4 wrong + 5 phantom entries (fixed in 1.0.62) and 0x21 turned out not to
+  be a course at all — End packets no longer update `program`.
+- drying_mode fixtures still synthetic (no real mode-browse capture).
 - Capture a real mid-cycle dryer door-open pause to learn its actual code
   (0x07 in the pause set is currently an unverified guess, shape-gated).
 - Audit the washer's info-class pause gate for the same shape-dependence
