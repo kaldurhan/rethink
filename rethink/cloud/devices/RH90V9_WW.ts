@@ -720,7 +720,9 @@ export default class Device extends AABBDevice {
                         `[RH90V9] Sending wake (F0 25 with 0x${this.lastDownloadedCycleId.toString(16)}) before power on`,
                     )
                     this.send(wake)
-                    setTimeout(() => this.send(Buffer.from('F02A0100', 'hex')), 500)
+                    // unref so lingering Done→Off fallbacks never hold the process open
+                    // (the daemon is kept alive by its sockets; tests exit cleanly)
+                    setTimeout(() => this.send(Buffer.from('F02A0100', 'hex')), 500).unref()
                 } else {
                     // No downloaded cycle known — send power on directly (may fail if idle)
                     log('status', '[RH90V9] No downloaded cycle known for wake sequence — sending F0 2A directly')

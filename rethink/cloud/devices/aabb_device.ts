@@ -75,6 +75,9 @@ export default abstract class AABBDevice extends HADevice {
             if (this.stageFsm) this.stageFsm.dispatch('offTimeout')
             else this.publishProperty('stage', 'Off')
         }, delayMs)
+        // unref so lingering Done→Off fallbacks never hold the process open
+        // (the daemon is kept alive by its sockets; tests exit cleanly)
+        this.offTimer.unref()
     }
 
     protected cancelOffTimer() {

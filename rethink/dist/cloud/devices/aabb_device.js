@@ -65,6 +65,9 @@ export default class AABBDevice extends HADevice {
             else
                 this.publishProperty('stage', 'Off');
         }, delayMs);
+        // unref so lingering Done→Off fallbacks never hold the process open
+        // (the daemon is kept alive by its sockets; tests exit cleanly)
+        this.offTimer.unref();
     }
     cancelOffTimer() {
         if (this.offTimer !== null) {

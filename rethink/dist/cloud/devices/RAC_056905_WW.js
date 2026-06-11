@@ -80,6 +80,9 @@ export default class Device extends TLVDevice {
                 this.initMakeSetConfig();
             }
         }, 500);
+        // unref so lingering Done→Off fallbacks never hold the process open
+        // (the daemon is kept alive by its sockets; tests exit cleanly)
+        this.tlvBlacklistDisableTimer.unref();
     }
     initProbeForFilter() {
         log('status', this.id, 'sending initial filter data query');
@@ -89,6 +92,9 @@ export default class Device extends TLVDevice {
             log('status', this.id, 'filter data query timeout, assuming no filter');
             this.initMakeSetConfig();
         }, 5 * 1000);
+        // unref so lingering Done→Off fallbacks never hold the process open
+        // (the daemon is kept alive by its sockets; tests exit cleanly)
+        this.filterInitialQueryTimeout.unref();
     }
     processFilterData(buf9, data) {
         if (data.length < 1 + 3 * 4) {

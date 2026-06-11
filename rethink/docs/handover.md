@@ -80,8 +80,9 @@ The `processAABB(inner)` method receives the AABB packet with `aa ff` header and
 - `drying_mode` branch (ST=`0xeb`, phA≠`0x05`) is covered only by **synthetic** fixtures
   (DISPLAY_ON_IDLE with phA/TR mutated) — no real capture of mode-browsing exists yet;
   replace fixtures when one is taken
-- `npm test` waits out 5-minute `scheduleOff` timers before exiting (CI runs ~5m37s);
-  pass `--test-force-exit` for fast local runs
+- Long-lived timers (`scheduleOff`, filter-probe timeouts) are `.unref()`'d; plain
+  `npm test` exits promptly (~1-2s). Do **not** use `--test-force-exit` — it silently
+  truncates the suite under load (observed: 241–281 tests reported across identical runs)
 
 ---
 
