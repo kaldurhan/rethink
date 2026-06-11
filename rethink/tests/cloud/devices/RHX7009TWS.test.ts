@@ -193,6 +193,15 @@ describe(MODEL_ID, () => {
         assert.equal(p.program, 'Quick Dry 30')
     })
 
+    test('programme selection (ST=0xec, ambiguous Startup tuple) does NOT start the stage machine', () => {
+        // The dryer broadcasts ST=0xec with phase tuple 0x0100 (Startup) while
+        // a programme is merely selected on the panel — the same tuple a real
+        // cycle shows for its first ~8 s. Only Heating/Drying may start stage.
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
+
     test('quick-dry-30 selected → remaining_time=30', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', QUICK_DRY_30_SELECTED)

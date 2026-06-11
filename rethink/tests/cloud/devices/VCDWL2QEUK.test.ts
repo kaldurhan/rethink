@@ -59,7 +59,18 @@ describe(MODEL_ID, () => {
     // Synthesized minimal long packet. Inner is 36 bytes; sub-block at
     // offset 14 carries the tuple under test. The AABB envelope (aa ff …
     // 00 bb) is stripped by the base class before processAABB is called.
-    function synthFrame(phA: number, phB: number, sp: number, cs: number, tt_lo: number, tt_hi: number): Buffer {
+    // sub[20..21] (`act`) defaults to a drum-activity code so the frame
+    // models a genuinely running machine; pass [0x01, 0x00] (the selection
+    // terminator) to model panel browsing / temp scrolling instead.
+    function synthFrame(
+        phA: number,
+        phB: number,
+        sp: number,
+        cs: number,
+        tt_lo: number,
+        tt_hi: number,
+        act: [number, number] = [0x0b, 0x26],
+    ): Buffer {
         const inner = Buffer.alloc(36)
         inner[0] = 0x20
         inner[10] = 0xec // ST = Running
@@ -73,9 +84,26 @@ describe(MODEL_ID, () => {
         inner[27] = tt_lo // sub[13] — remaining_time low byte
         inner[28] = tt_hi // sub[14] — remaining_time high byte
         inner[33] = cs // sub[19] — CS repeat (required by locator)
-        inner[34] = 0x01 // sub[20] — terminator (required by locator)
+        inner[34] = act[0] // sub[20] — selection terminator or activity byte A
+        inner[35] = act[1] // sub[21] — activity byte B
         return Buffer.concat([Buffer.from([0xaa, 0xff]), inner, Buffer.from([0x00, 0xbb])])
     }
+
+    // Real capture 2026-06-11 11:57:33 — user browsing programmes on the
+    // panel (Blandmaterial shown, Quick 14 selected). ST=0xec although the
+    // drum is off; the status block ends in the selection terminator (01,00).
+    const SELECTION_BROWSE = buf(
+        'aaff200a00760022ee000100ec006400050310062b00000000000000008400840000002b0100000000000307040100755a0000000200041800000000000004000000030110014b00000000000000001600160000004b0100000900000307040100755a200000020004180000000000000400004eccbb',
+    )
+
+    test('programme selection (ST=0xec, terminator 01,00) does NOT start the stage machine', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', SELECTION_BROWSE)
+        // run_state mirrors the ST byte (long-standing contract)…
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        // …but stage must not pretend the drum is washing.
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
 
     test('cycle_phase WashTumble + remaining_time decode when not Idle', () => {
         const { ha, thinq } = makeDevice()
@@ -386,7 +414,8 @@ describe(MODEL_ID, () => {
     // capture 2026-06-11, where cloud TEMP_95 correlated with phA=0x06 in 0x03-variant sub-blocks).
     test('temperature scroll: TEMP_95 settled (phA=0x06, phase Idle 0x0610)', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', synthFrame(0x06, 0x10, 0x09, 0x2e, 0x8a, 0x00))
+        // temp scrolls are selection-state frames → selection terminator
+        thinq.emit('data', synthFrame(0x06, 0x10, 0x09, 0x2e, 0x8a, 0x00, [0x01, 0x00]))
         assert.equal(ha.devices[DEVICE_ID].properties.temp, '95')
     })
 

@@ -212,7 +212,11 @@ export default class Device extends AABBDevice {
             this.publishProperty('remaining_time', 0)
         }
 
-        if (st === 0xec) this.stageFsm!.dispatch('cycleActive')
+        // cycleActive for full Running packets is dispatched below, after the
+        // phase decode: ST=0xec also broadcasts during programme selection
+        // (drum off, phase Idle) and must not start the stage machine. Short
+        // Running packets carry no phase but only occur mid-cycle.
+        if (st === 0xec && inner.length < 24) this.stageFsm!.dispatch('cycleActive')
         if (st === 0x04 || st === 0xe2 || st === 0x03) this.stageFsm!.dispatch('ended')
         if (st === 0x0b) this.stageFsm!.dispatch('standby')
 
@@ -237,7 +241,12 @@ export default class Device extends AABBDevice {
         this.publishProperty('phase', phase)
 
         if (st === 0xec) {
-            if (phase === 'Startup' || phase === 'Heating') this.stageFsm!.dispatch('heatPhase')
+            // Idle (selection display) and Startup (0x0100 — broadcast both
+            // while a programme is merely selected AND for the first ~8 s of a
+            // real cycle) must not start the stage machine; the first
+            // Heating/Drying packet starts the cycle moments later.
+            if (phase !== 'Idle' && phase !== 'Startup') this.stageFsm!.dispatch('cycleActive')
+            if (phase === 'Heating') this.stageFsm!.dispatch('heatPhase')
             else if (phase === 'Drying') this.stageFsm!.dispatch('dryPhase')
             else if (phase === 'Cooldown' || phase === 'Finishing') this.stageFsm!.dispatch('coolPhase')
         }
