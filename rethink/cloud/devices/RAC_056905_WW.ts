@@ -106,7 +106,7 @@ export default class Device extends TLVDevice {
                 this.initMakeSetConfig()
             }
         }, 500)
-        // unref so lingering Done→Off fallbacks never hold the process open
+        // unref so this init-sequencing delay never holds the process open
         // (the daemon is kept alive by its sockets; tests exit cleanly)
         this.tlvBlacklistDisableTimer.unref()
     }
@@ -121,7 +121,7 @@ export default class Device extends TLVDevice {
             log('status', this.id, 'filter data query timeout, assuming no filter')
             this.initMakeSetConfig()
         }, 5 * 1000)
-        // unref so lingering Done→Off fallbacks never hold the process open
+        // unref so this filter-probe fallback never holds the process open
         // (the daemon is kept alive by its sockets; tests exit cleanly)
         this.filterInitialQueryTimeout.unref()
     }
