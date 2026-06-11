@@ -21,6 +21,7 @@ describe('Eco 40-60 full-cycle replay (captured 2026-06-11)', () => {
         new DUT(ha.asConnection(), thinq, META)
 
         const stages: string[] = []
+        const phases: string[] = []
         const lines = readFileSync(join(import.meta.dirname, '../../fixtures/eco-cycle-raw.ndjson'), 'utf-8')
             .trim()
             .split('\n')
@@ -31,6 +32,8 @@ describe('Eco 40-60 full-cycle replay (captured 2026-06-11)', () => {
             thinq.emit('data', Buffer.from(rx, 'hex'))
             const stage = ha.devices['replay-eco']?.properties.stage as string
             if (stage && stage !== stages[stages.length - 1]) stages.push(stage)
+            const phase = ha.devices['replay-eco']?.properties.cycle_phase as string
+            if (phase && phase !== phases[phases.length - 1]) phases.push(phase)
         }
 
         // Deterministic replay → assert the exact walk. This subsumes
@@ -39,5 +42,12 @@ describe('Eco 40-60 full-cycle replay (captured 2026-06-11)', () => {
         // time, so the >90 s 0x76-silence gate for final spin can never open.
         // (Off never appears: the capture ends before the Done→Off fallback.)
         assert.deepEqual(stages, ['Washing', 'Rinsing', 'Spinning', 'Done'])
+
+        // Forward-only coarse walk from the activity codes. Finished comes
+        // from the AntiCrease packet; the trailing Idle from the post-cycle
+        // (00,10) block. The 11:51:12 locator mis-pick (bogus Allergivård
+        // block, rem=256) must NOT inject an Idle mid-cycle — Guard B
+        // discards it.
+        assert.deepEqual(phases, ['Washing', 'Rinsing', 'Spinning', 'Finished', 'Idle'])
     })
 })
