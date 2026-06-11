@@ -364,12 +364,55 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 0)
     })
 
-    test('finished → run_state=End', () => {
+    test('finished → run_state=End; End packets do not update program', () => {
+        // End packets carry 0x21 at the course offset — not a real course
+        // (the cloud panel list has exactly 13, all byte-correlated during
+        // the 2026-06-11 knob scroll). program retains what actually ran.
         const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.program, 'Quick Dry 30')
         thinq.emit('data', FINISHED)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
         assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 0)
-        assert.equal(ha.devices[DEVICE_ID].properties.program, 'Auto Dry')
+        assert.equal(ha.devices[DEVICE_ID].properties.program, 'Quick Dry 30')
+    })
+
+    // Captured live 2026-06-11 19:50–19:51 during the full programme-knob
+    // scroll, cloud-correlated in real time. These five corrected the table:
+    // 0x2c=AI_COURSE (was wrongly 0x26), 0x19=COTTONPLUS/panel "Eko" (was
+    // wrongly 0x1c), 0x05=EASYCARE (was "Timed Dry"), 0x15=TIMEDRY (was
+    // "Allergy Care"), 0x10=ALLERGYCARE (was missing).
+    const SCROLL_AI = buf(
+        'aaff300a007800b91f000100ec006600000200000800000000500050010000020000040800000020000081050000000000000000000000000000640004007800000000000200002c00000000500050010000020000041c0000002000008105000000000000000000000000000064000400780000006198bb',
+    )
+    const SCROLL_ECO = buf(
+        'aaff300a007800b923000100ec00660003030000070000000096009601000002000004070000002000008105000000000000000000000000000064000400780000000003020000190000000064006401000000000004190000002000048105000000000000000000000000000064000400780000009817bb',
+    )
+    const SCROLL_EASYCARE = buf(
+        'aaff300a007800b926000100ec006600000200000a00000000460046010000020000040a0000002000008105000000000000000000000000000064000400780000000003030000050000000050005001000002000004050000002000008105000000000000000000000000000064000400780000009cbabb',
+    )
+    const SCROLL_TIMEDRY = buf(
+        'aaff300a007800b927000100ec0066000303000005000000005000500100000200000405000000200000810500000000000000000000000000006400040078000000000003000015000000005000500100000200000415000000200000810500000000000000000000000000006400040078000000105abb',
+    )
+    const SCROLL_ALLERGY = buf(
+        'aaff300a007800b928000100ec006600000300001500000000500050010000020000041500000020000081050000000000000000000000000000640004007800000000000300001000000000500050010000020000041000000020000081050000000000000000000000000000640004007800000057acbb',
+    )
+
+    test('knob-scroll selections decode the corrected course bytes', () => {
+        const { ha, thinq } = makeDevice()
+        const expect = [
+            [SCROLL_AI, 'AI Dry'],
+            [SCROLL_ECO, 'Eco'],
+            [SCROLL_EASYCARE, 'Easy Care'],
+            [SCROLL_TIMEDRY, 'Timed Dry'],
+            [SCROLL_ALLERGY, 'Allergy Care'],
+        ]
+        for (const [pkt, name] of expect) {
+            thinq.emit('data', pkt)
+            assert.equal(ha.devices[DEVICE_ID].properties.program, name)
+        }
+        // selection only — the stage machine must stay off
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
     })
 
     test('unknown frame type byte is ignored (no crash)', () => {

@@ -17,22 +17,28 @@ const STATES: Record<number, string> = {
     0x04: 'End',
 }
 
-// Course/programme byte (inner[18] for single-block, inner[69] for double-block)
+// Course/programme byte (inner[18] for single-block, inner[69] for double-block).
+// All 13 panel courses cloud-correlated live during the full programme-knob
+// scroll 2026-06-11 19:50 (capture: program-scroll-2026-06-11-*). Cloud names:
+// MIXFABRIC, QUICKDRY, WOOL, TURBODRY, SPORTWEAR, AI_COURSE, NORMAL,
+// COTTONPLUS (panel "Eko"), DELICATES, EASYCARE, TIMEDRY, ALLERGYCARE,
+// TUBCLEAN. The scroll removed five phantom entries (0x0d, 0x1b, 0x1c, 0x26,
+// 0x21) and corrected 0x05/0x15 — the panel has exactly these 13. The 0x21
+// byte seen in End packets is not a course; program is not read from End
+// packets (see processAABB).
 const COURSES: Record<number, string> = {
-    0x05: 'Timed Dry',
+    0x05: 'Easy Care',
     0x06: 'Mixed Fabrics',
     0x07: 'Cotton',
     0x08: 'Sportswear',
     0x09: 'Quick Dry 30',
     0x0a: 'Delicates',
     0x0b: 'Wool',
-    0x0d: 'Easy Iron',
+    0x10: 'Allergy Care',
     0x13: 'Drum Care',
-    0x15: 'Allergy Care',
-    0x1b: 'Strykfritt',
-    0x1c: 'Eco',
-    0x21: 'Auto Dry', // observed only in End packet; exact name unconfirmed
-    0x26: 'AI Dry',
+    0x15: 'Timed Dry',
+    0x19: 'Eco',
+    0x2c: 'AI Dry',
     0x3a: 'TurboDry',
 }
 
@@ -259,7 +265,12 @@ export default class Device extends AABBDevice {
         const csOffset = hasSub2 ? sub2Start + 5 : 18
         const cs = inner[csOffset]
 
-        this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
+        // End packets (ST=0x04) carry 0x21 at the course offset — not a real
+        // course (the panel has exactly 13, all byte-correlated 2026-06-11).
+        // Keep the programme that actually ran.
+        if (st !== 0x04) {
+            this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
+        }
         this.publishProperty('phase', phase)
 
         if (st === 0xec && !isUnknownRunning) {
