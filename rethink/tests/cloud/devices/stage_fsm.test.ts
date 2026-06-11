@@ -108,6 +108,19 @@ describe('StageFSM (washer table)', () => {
         assert.deepEqual(published, ['Washing'])
     })
 
+    test('Off + paused → Paused (pause packet on fresh device, e.g. wiped /data while machine paused)', () => {
+        const { fsm, published } = washerFsm()
+        fsm.dispatch('paused')
+        assert.deepEqual(published, ['Paused'])
+    })
+
+    test('Paused with no remembered stage exits to Off on standby', () => {
+        const { fsm, published } = washerFsm()
+        fsm.dispatch('paused')
+        fsm.dispatch('standby')
+        assert.deepEqual(published, ['Paused', 'Off'])
+    })
+
     test('offTimeout from Done → Off', () => {
         const { fsm, published } = washerFsm()
         fsm.dispatch('cycleActive')
