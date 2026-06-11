@@ -187,15 +187,23 @@ export default class Device extends AABBDevice {
         if (st === 0xec && tr === 0) return
 
         // Info-class packets (inner[8]=0x02) use a different byte layout — CS/TR/phase
-        // offsets are unreliable. Info-class ST=0x03 packets carry a sub-state
-        // code at inner[13], mirrored at inner[17] (same layout as the washer):
-        // 0x0c = panel pause, 0x07 = mid-cycle door-open pause, 0x10 = idle
-        // door event, 0x0e = idle panel event (live-captured 2026-06-11).
-        // Only the real pause codes may publish Paused; everything else is
-        // idle chatter and stays suppressed.
+        // offsets are unreliable. Info-class ST=0x03 packets carry a code at
+        // inner[13], mirrored at inner[17], but the code's meaning depends on
+        // the packet shape, keyed by the sub-block length at inner[12]:
+        //   0x16 (len 77–81) — user events: 0x0c panel pause, 0x10 idle door,
+        //        0x12 cooldown chime; 0x1e (len 85) — 0x0e idle panel event.
+        //   0x29 (len 96) — a progress counter that walked 0x07→0x08→0x09
+        //        across a live cycle (2026-06-11, door untouched). The 0x07
+        //        value was previously misread as a door-open pause code and
+        //        flipped run_state/stage to Paused for 1 s mid-Drying.
+        // Only a pause code in the user-event shape may publish Paused;
+        // everything else is chatter and stays suppressed. 0x07 stays in the
+        // pause set (shape-gated) until a real mid-cycle door pause is
+        // captured to confirm its code.
         if (isInfoClass) {
             const code = inner.length > 17 && inner[13] === inner[17] ? inner[13] : -1
-            if (st === 0x03 && (code === 0x0c || code === 0x07)) {
+            const isUserEventShape = inner[12] === 0x16
+            if (st === 0x03 && isUserEventShape && (code === 0x0c || code === 0x07)) {
                 this.publishProperty('run_state', 'Paused')
                 this.stageFsm!.dispatch('paused')
             }

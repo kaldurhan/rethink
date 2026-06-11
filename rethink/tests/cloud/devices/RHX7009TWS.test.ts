@@ -222,8 +222,9 @@ describe(MODEL_ID, () => {
 
     // Captured live 2026-06-11 14:54 — door open/close and panel power on the
     // IDLE dryer emit info-class ST=0x03 bursts with sub-state codes 0x10
-    // (door) and 0x0e (panel), mirrored at inner[13]/inner[17]. Only 0x0c
-    // (panel pause) and 0x07 (mid-cycle door-open) are real pauses.
+    // (door) and 0x0e (panel), mirrored at inner[13]/inner[17]. Real pauses
+    // (code 0x0c) arrive only in the short user-event packet shape
+    // (inner[12]=0x16); codes in larger info packets are progress chatter.
     const IDLE_DOOR_INFO = buf(
         'aaff300a005100b74e0002010300161010030510000005e100000000000000000000000000010500255344485f58375f373030380000000000000000000102c2220b8b01070000000000000000006b72bb',
     )
@@ -237,6 +238,25 @@ describe(MODEL_ID, () => {
         thinq.emit('data', IDLE_PANEL_INFO)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
         assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
+
+    // Captured live 2026-06-11 18:41:57 mid-Drying with the door untouched
+    // (user-confirmed): a len=96 info packet ([12]=0x29) whose counter at
+    // [13]/[17] happened to read 0x07 — the same value once misread as a
+    // "door-open pause" code. The counter walked 0x07→0x08→0x09 across the
+    // cycle; only this first value collided with the pause set, flipping
+    // run_state/stage to Paused for 1 s on 1.0.59/1.0.60.
+    const SPURIOUS_INFO_07 = buf(
+        'aaff300a006400b8960002010300290710030507010e05f402090300150009090903030004000000000000000045003c0000000000010108010500255344485f58375f373030380000000000000000000102c3220b8b0107000000000000000000b80abb',
+    )
+
+    test('mid-cycle info chatter with counter byte 0x07 (len=96 shape) is NOT a pause', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', SPURIOUS_INFO_07)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
     })
 
     test('programme selection (ST=0xec, ambiguous Startup tuple) does NOT start the stage machine', () => {
@@ -300,10 +320,14 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 1)
     })
 
-    test('info-class ST=0x03 (originally labelled COOLDOWN) → run_state=Paused, program/phase untouched', () => {
+    test('info-class ST=0x03 cooldown chatter (len=96 shape, counter 0x07) publishes nothing', () => {
+        // This fixture was captured during a real cooldown on 2026-06-03 and
+        // was briefly misread as a door-open pause — its [13]/[17] counter
+        // value 0x07 collided with the pause set. It is routine chatter:
+        // same shape as SPURIOUS_INFO_07 above.
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COOLDOWN)
-        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
         assert.equal(ha.devices[DEVICE_ID].properties.phase, undefined)
         assert.equal(ha.devices[DEVICE_ID].properties.program, undefined)
     })
