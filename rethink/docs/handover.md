@@ -8,7 +8,7 @@ A fork of [anszom/rethink](https://github.com/anszom/rethink) — a local protoc
 **Working directory (WSL):** `/home/zorgin/project/rethink/rethink`  
 **HA addon slug:** `rethink` (store slug `daf7d2b6_rethink`)  
 **GHCR image:** `ghcr.io/kaldurhan/rethink`  
-**Deployed version:** 1.0.62 (2026-06-11)
+**Deployed version:** 1.0.63 (2026-06-11)
 
 ---
 
@@ -79,14 +79,21 @@ deployment) and each has the actual captured packet as a regression fixture.
 
 `sub[1..2]` is a **display/selection code** (temp index + settled marker —
 frozen at e.g. `(03,0e)` for an entire Eco 40-60 cycle), while the real drum
-activity progresses at **`sub[20..21]`** (Eco sequence observed:
-`(03,01)→(26,03)→(02,26)→(0b,02)→(26,0b)↔(0b,26)→(0c,0b)→(0e,0c)→(10,0e)`).
-The current PHASES_VCDWL table mixes both namespaces — the planned
-**cycle_phase rework** should decode activity from `sub[20..21]`. Full-cycle
-raw capture + decoded timeline: `/home/zorgin/rethink-captures/` (also
-committed as the replay fixture `tests/fixtures/eco-cycle-raw.ndjson`).
-One locator mis-pick observed at 11:51:12 in that capture (blk@73, garbage
-course) — worth a guard during the rework.
+activity progresses at **`sub[20]`** (`sub[21]` echoes the previous code;
+Eco sequence: `01→03→26→02→0b` (wash, `26↔0b` refills) `→0c→0e→10→00`).
+**The cycle_phase rework landed in 1.0.63**
+(spec `docs/superpowers/specs/2026-06-11-washer-cycle-phase-activity-design.md`,
+project repo): `cycle_phase` decodes from `ACTIVITY_VCDWL[sub[20]]`
+(Idle/Detecting/Filling/Washing/Rinsing/Spinning/Finished; `03/26/02`
+labels best-guess, confirm next live cycle); passive blocks (act
+`01/10/00`) replace the display-tuple Finished suppression — which had
+been eating LIVE final-spin packets (disp `(00,00)` appears mid-spin),
+freezing remaining_time/run_state through every spin; two mis-pick guards
+(rem > 360 in the locator; course-continuity while stage active) kill the
+114-byte variant's fake blocks; `lastTumbleTime` only refreshes on
+tumble-class codes so the 0x53 final-spin stage gate keeps working.
+Eco replay pins both walks (stage + phase). Full-cycle raw capture:
+`/home/zorgin/rethink-captures/` and `tests/fixtures/eco-cycle-raw.ndjson`.
 
 ### HA side (repo `/home/zorgin/project`)
 
@@ -127,7 +134,9 @@ course) — worth a guard during the rework.
 
 ### Open follow-ups
 
-- cycle_phase rework using activity codes (capture data ready, see above).
+- ~~cycle_phase rework using activity codes~~ DONE in 1.0.63 (see "Two phase
+  fields" section above). Remaining nit: confirm the best-guess
+  Detecting/Filling labels (act 03/26/02) against the next live wash start.
 - Washer door sensor false-open: a 0x63-byte-long info packet collides with
   the `packetType === 0x63` door intercept; real door events may be the short
   `aa 08 20 …` frames (currently discarded as <11 bytes). Needs an idle
