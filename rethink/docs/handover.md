@@ -8,7 +8,7 @@ A fork of [anszom/rethink](https://github.com/anszom/rethink) — a local protoc
 **Working directory (WSL):** `/home/zorgin/project/rethink/rethink`  
 **HA addon slug:** `rethink` (store slug `daf7d2b6_rethink`)  
 **GHCR image:** `ghcr.io/kaldurhan/rethink`  
-**Deployed version:** 1.0.59 (2026-06-11)
+**Deployed version:** 1.0.60 (2026-06-11)
 
 ---
 
@@ -95,8 +95,23 @@ course) — worth a guard during the rework.
 
 - ✅ Idle interactions (door/panel/power on both machines) end at
   run_state=Standby, stage=Off — user-verified on 1.0.59.
-- ⏳ First real wash + dry on the new stack: expect exactly one
-  `tvattmaskin_klar`/`torktumlare_klar` notification each, watchdog silent.
+- ✅ First real wash on the new stack (Quick 14, 2026-06-11 18:40): exactly one
+  Done edge, Done→Off fallback after 5 min, one notification, watchdog silent.
+- ❌→fixed: first real dry (Quick Dry 30, 2026-06-11 18:51) produced a
+  **duplicate Done edge** on 1.0.59: 5 s after AntiCrease latched Done, a
+  double-block ST=0xec packet with sub2 TR=1 (so the TR=0 post-cycle guard
+  missed it) and unmapped phase tuple `(04,00)` passed the blocklist
+  cycleActive gate and restarted the FSM (Done→Heating); the End packet 21 s
+  later latched Done #2. The HA `start_kwh > 0` FINISH guard suppressed the
+  double notification (defense in depth worked). Fixed in 1.0.60: ST=0xec
+  with an unmapped phase tuple is treated like selection chatter (no
+  run_state claim, no FSM events, no remaining_time); both packets are
+  regression fixtures. Monitor log + raw captures:
+  `/home/zorgin/rethink-captures/validation-2026-06-11-*`.
+- ⏳ Re-validate one full wash+dry on 1.0.60 (expect clean exactly-once on
+  the dryer too). During the 18:41 dry a 1-s Paused blip appeared from a
+  genuine info-class door-pause code 0x07 — ask the user whether the dryer
+  door was briefly opened; if not, code 0x07 may need debouncing.
 
 ### Open follow-ups
 
