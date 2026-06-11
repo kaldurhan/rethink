@@ -369,21 +369,23 @@ export default class Device extends AABBDevice {
         // Suppress so End/AntiCrease stays visible in HA.
         if (st === 0xec && sub && decodePhase(sub[1], sub[2]) === 'Finished') return
 
-        // DisplayOn is transient user-browsing; keep the last meaningful state visible.
-        // Exception: empty cache or stale 'DisplayOn' retained value → publish Standby
-        // so the broker's retained message is corrected.
-        if (st !== 0xeb) {
+        // ST=0xec also broadcasts while a programme is merely selected on the
+        // panel (drum off). Selection blocks end in the terminator (01,00) at
+        // sub[20..21]; running blocks carry drum-activity codes there. Short
+        // packets (no sub-block) only occur mid-cycle.
+        const isSelectionBlock =
+            st === 0xec && sub !== null && inner[subStart + 20] === 0x01 && inner[subStart + 21] === 0x00
+
+        if (st !== 0xeb && !isSelectionBlock) {
             this.publishProperty('run_state', stateLabel)
-            // ST=0xec also broadcasts while a programme is merely selected on
-            // the panel (drum off) — run_state mirrors the byte, but the stage
-            // machine must not start. Selection blocks end in the terminator
-            // (01,00) at sub[20..21]; running blocks carry drum-activity codes
-            // there. Short packets (no sub-block) only occur mid-cycle.
-            const isSelectionBlock = sub !== null && inner[subStart + 20] === 0x01 && inner[subStart + 21] === 0x00
-            if (st === 0xec && !isSelectionBlock) this.stageFsm!.dispatch('cycleActive')
+            if (st === 0xec) this.stageFsm!.dispatch('cycleActive')
             if (st === 0x04 || st === 0xe2) this.stageFsm!.dispatch('ended')
             if (st === 0x0b) this.stageFsm!.dispatch('standby')
         } else {
+            // DisplayOn and selection chatter are transient user-browsing —
+            // keep the last meaningful state visible. Empty cache or stale
+            // 'DisplayOn' retained value → publish Standby so the broker's
+            // retained message is corrected.
             const cached = this.getProperty('run_state')
             if (!cached || cached === 'DisplayOn') this.publishProperty('run_state', 'Standby')
         }

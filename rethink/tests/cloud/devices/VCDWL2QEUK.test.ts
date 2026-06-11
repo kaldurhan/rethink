@@ -99,10 +99,30 @@ describe(MODEL_ID, () => {
     test('programme selection (ST=0xec, terminator 01,00) does NOT start the stage machine', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', SELECTION_BROWSE)
-        // run_state mirrors the ST byte (long-standing contract)…
-        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
-        // …but stage must not pretend the drum is washing.
+        // Selection chatter is treated like DisplayOn: fresh cache → Standby,
+        // never 'Running' — the drum is off.
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+        // …and stage must not pretend the drum is washing.
         assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
+
+    test('trailing selection packet after standby does not flip run_state back to Running', () => {
+        // Observed live 2026-06-11: power-off emits standby, then a final
+        // selection packet as the panel shuts down — run_state froze at
+        // 'Running' until the next interaction.
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', STANDBY_1)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+        thinq.emit('data', SELECTION_BROWSE)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+    })
+
+    test('selection packet mid-cycle context keeps the cached meaningful state', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x03, 0x0e, 0x09, 0x13, 0x67, 0x00)) // real running
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        thinq.emit('data', SELECTION_BROWSE) // selection-style frame must not downgrade it
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('cycle_phase WashTumble + remaining_time decode when not Idle', () => {
@@ -354,7 +374,9 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COTTON_40_1200)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.run_state, 'Running')
+        // Boot-up frame is selection-context (drum off, terminator 01,00):
+        // since the selection fix, run_state falls back to Standby, not Running.
+        assert.equal(p.run_state, 'Standby')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
         // Broadcast-lag: appliance had not committed SP=0x0c (1200rpm) yet;
