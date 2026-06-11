@@ -1,8 +1,18 @@
-import { describe, test } from 'node:test'
+import { describe, test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import DUT from '@/cloud/devices/VCDWL2QEUK'
 import type { Metadata } from '@/cloud/thinq'
 import { MockHAConnection, MockThinq2Device, buf } from '@/tests/helpers/mocks'
+import { setFilter } from '@/util/logging'
+
+// mocks.ts suppresses all device logging; re-enable it for tests that assert
+// on log output, restoring suppression afterwards.
+function captureLog(t: TestContext) {
+    const spy = t.mock.method(console, 'log')
+    setFilter(() => true)
+    t.after(() => setFilter(() => false))
+    return spy
+}
 
 const DEVICE_ID = 'test-id'
 const MODEL_ID = 'VCDWL2QEUK'
@@ -98,6 +108,34 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', synthFrame(0xff, 0xff, 0x06, 0x2b, 0x00, 0x00))
         assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'unknown')
+    })
+
+    test('unknown course byte → course publishes enum-safe "unknown", raw byte goes to log', (t) => {
+        const spy = captureLog(t)
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x05, 0x10, 0x06, 0x99, 0x00, 0x00))
+        // 'unknown' is in the course enum options; 'unknown_0x99' would be
+        // rejected by HA and wedge the sensor.
+        assert.equal(ha.devices[DEVICE_ID].properties.course, 'unknown')
+        const logged = spy.mock.calls.map((c) => c.arguments.join(' ')).join('\n')
+        assert.match(logged, /0x99/)
+    })
+
+    test('unknown course byte is logged once per code, not per packet', (t) => {
+        const spy = captureLog(t)
+        const { thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x05, 0x10, 0x06, 0x99, 0x00, 0x00))
+        thinq.emit('data', synthFrame(0x05, 0x10, 0x06, 0x99, 0x00, 0x00))
+        const hits = spy.mock.calls.filter((c) => c.arguments.join(' ').includes('0x99'))
+        assert.equal(hits.length, 1)
+    })
+
+    test('unrecognized phase tuple logs raw bytes for future decoding', (t) => {
+        const spy = captureLog(t)
+        const { thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0xff, 0xfe, 0x06, 0x2b, 0x00, 0x00))
+        const logged = spy.mock.calls.map((c) => c.arguments.join(' ')).join('\n')
+        assert.match(logged, /\(ff fe\)/)
     })
 
     test('config exposes expected components on construction', () => {

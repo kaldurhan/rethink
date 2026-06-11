@@ -3,6 +3,7 @@ import { type Connection } from '../homeassistant'
 import { type Metadata } from '../thinq'
 import AABBDevice from './aabb_device'
 import HADevice from './base'
+import log from '@/util/logging'
 
 // inner[10] — run state.
 const STATES_VCDWL: Record<number, string> = {
@@ -146,6 +147,10 @@ export default class Device extends AABBDevice {
     // Count of intermediate spin-ramp events seen in the current cycle.
     // 0 = still in wash phase; ≥1 = rinse phase has begun.
     spinRampsSeen = 0
+    // Last unmapped course/phase codes already logged — packets repeat every few
+    // seconds, so without this gate an unknown code floods the add-on log.
+    private loggedUnknownCourse = -1
+    private loggedUnknownPhase = -1
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
@@ -376,6 +381,13 @@ export default class Device extends AABBDevice {
         if (!sub) return
 
         const phase = decodePhase(sub[1], sub[2])
+        if (phase === 'unknown') {
+            const tuple = (sub[1] << 8) | sub[2]
+            if (tuple !== this.loggedUnknownPhase) {
+                log('status', this.id, `unknown phase tuple (${sub[1].toString(16)} ${sub[2].toString(16)})`)
+                this.loggedUnknownPhase = tuple
+            }
+        }
         this.publishProperty('cycle_phase', phase)
         this.lastTumbleTime = Date.now()
 
@@ -388,7 +400,14 @@ export default class Device extends AABBDevice {
         this.publishProperty('spin', SPINS_VCDWL[sp] ?? 0)
 
         const cs = sub[4]
-        this.publishProperty('course', COURSES_VCDWL[cs] ?? `unknown_0x${cs.toString(16).padStart(2, '0')}`)
+        const courseLabel = COURSES_VCDWL[cs]
+        if (courseLabel === undefined && cs !== this.loggedUnknownCourse) {
+            log('status', this.id, `unknown course byte 0x${cs.toString(16).padStart(2, '0')}`)
+            this.loggedUnknownCourse = cs
+        }
+        // 'unknown' is in the enum options list; a dynamic label would be
+        // rejected by HA's enum validation.
+        this.publishProperty('course', courseLabel ?? 'unknown')
 
         // sub[20] is the terminator byte: 0x01 for temp-scroll sub-blocks (21 bytes),
         // 0x0b for active-running sub-blocks (50 bytes). Both have cs-repeat at sub[19].
