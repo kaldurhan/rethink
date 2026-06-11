@@ -141,7 +141,16 @@ function findStatusSubBlock(inner: Buffer): number {
         if (cs === 0x00) continue
         if (inner[i + 5] !== 0x00) continue
 
-        if (inner[i + 19] === cs) return i
+        if (inner[i + 19] !== cs) continue
+
+        // Guard A (2026-06-11 spec): the 114-byte packet variant fakes a
+        // valid-looking block whose remaining-time field is absurd
+        // (2304 min observed; legit blocks max 152). No programme exceeds
+        // 6 h — reject and keep scanning, which recovers the true block.
+        const rem = inner[i + 13] | (inner[i + 14] << 8)
+        if (rem > 360) continue
+
+        return i
     }
     return -1
 }

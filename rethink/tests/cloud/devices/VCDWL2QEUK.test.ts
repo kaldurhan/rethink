@@ -96,6 +96,27 @@ describe(MODEL_ID, () => {
         'aaff200a00760022ee000100ec006400050310062b00000000000000008400840000002b0100000000000307040100755a0000000200041800000000000004000000030110014b00000000000000001600160000004b0100000900000307040100755a200000020004180000000000000400004eccbb',
     )
 
+    // Captured live 2026-06-11 18:37:36 mid-Quick-14 — a 114-byte status
+    // packet whose inner structure fakes a valid-looking sub-block at
+    // blk@73 (cs=0x04 Allergivård, rem=2304). The true block sits at
+    // blk@64 (cs=0x4b Quick 14, rem=4, act=(0e,0c)). The locator's
+    // backwards scan must reject the rem=2304 candidate and recover the
+    // true block.
+    const MISPICK_114_QUICK14 = buf(
+        'aaff200a0076002535000100ec006400000000014b00000000000000000500160026004b0e0c000900000308040100755a2000001001041800000000000004000000000000014b00000000000000000400160027004b0e0c000900000308040100755a200000100104180000000000000400002b7dbb',
+    )
+
+    test('locator rejects sub-block candidates with absurd remaining time (Guard A)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', MISPICK_114_QUICK14)
+        // Mis-pick published 'Allergivård' before the guard. The recovered
+        // true block (cs=0x4b, disp=(00,00)) is still display-tuple
+        // suppressed until the activity-code rework lands — Task 3
+        // strengthens this assertion to course === 'Quick 14'.
+        assert.notEqual(ha.devices[DEVICE_ID].properties.course, 'Allergivård')
+        assert.notEqual(ha.devices[DEVICE_ID].properties.remaining_time, 2304)
+    })
+
     test('programme selection (ST=0xec, terminator 01,00) does NOT start the stage machine', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', SELECTION_BROWSE)
