@@ -138,6 +138,59 @@ describe(MODEL_ID, () => {
         assert.match(logged, /\(ff fe\)/)
     })
 
+    // ── Pause (captured 2026-06-11, correlated with cloud state PAUSE) ──────
+    // Info-class packets (inner[8]=0x02, ST=0x03) carry a sub-state code at
+    // inner[13], mirrored at inner[17]: 0x11 idle-browse, 0x1e pre-detect,
+    // 0x01 DETECTING, 0x0b DETERGENT_INPUT, 0x0c PAUSE. Only 0x0c is a pause;
+    // the others occur during a normal running cycle and must stay suppressed.
+
+    // 11:58:20 — cloud reported state PAUSE 11:58:16→11:58:28
+    const PAUSE_INFO = buf(
+        'aaff200a00880022ff00020103004d0c0e01020c00e1008c0b0000008603c602040204000004020401010a0000400000040000010200752d5a00072a47001b630063010200030003000000000000000000000000000000000000001601050025564344574c325145554b000000000000000000000102c1220b8b0107000000000000000000dcf2bb',
+    )
+    // 11:57:54 — cloud state DETECTING (cycle starting, NOT paused)
+    const DETECTING_INFO = buf(
+        'aaff200a00880022f600020103004d010e01020100e1008a030000008603c603280328000004020401020a0000400000040000010200752d5a00072a47001b630063010000000000000000000000000000000000000000000000001601050025564344574c325145554b000000000000000000000102bc220b8b0107000000000000000000fbd9bb',
+    )
+    // 11:58:09 — cloud state DETERGENT_INPUT (cycle running, NOT paused)
+    const DETERGENT_INFO = buf(
+        'aaff200a00470022fb00020103000c0b0e01020b00e1008b02000001050025564344574c325145554b000000000000000000000102bf220b8b0107000000000000000000c3a9bb',
+    )
+
+    test('pause info packet (sub-state 0x0c) → run_state=Paused, stage=Paused', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', PAUSE_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Paused')
+    })
+
+    test('detecting/detergent info packets are NOT a pause — stay suppressed', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DETECTING_INFO)
+        thinq.emit('data', DETERGENT_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
+
+    test('resume after pause restores run_state=Running and the pre-pause stage', () => {
+        const { ha, thinq } = makeDevice()
+        // Tumble phase with no spin ramps yet → stage=Washing
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x06, 0x2b, 0x05, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+        thinq.emit('data', PAUSE_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x06, 0x2b, 0x04, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+    })
+
+    test('run_state and stage enum options include Paused', () => {
+        const { ha } = makeDevice()
+        const cfg = ha.devices[DEVICE_ID].config?.components as Record<string, Record<string, unknown>>
+        assert.ok((cfg.run_state.options as string[]).includes('Paused'))
+        assert.ok((cfg.stage.options as string[]).includes('Paused'))
+    })
+
     test('config exposes expected components on construction', () => {
         const { ha } = makeDevice()
         const cfg = ha.devices[DEVICE_ID].config

@@ -146,6 +146,8 @@ export default class Device extends AABBDevice {
         // seconds, so without this gate an unknown code floods the add-on log.
         this.loggedUnknownCourse = -1;
         this.loggedUnknownPhase = -1;
+        // Stage shown before a pause, restored when the cycle resumes.
+        this.stageBeforePause = 'Off';
         const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown'];
         const phaseOptions = [
             'Idle',
@@ -172,7 +174,7 @@ export default class Device extends AABBDevice {
                     name: 'Run state',
                     icon: 'mdi:power',
                     device_class: 'enum',
-                    options: ['Standby', 'Running', 'End', 'AntiCrease'],
+                    options: ['Standby', 'Running', 'Paused', 'End', 'AntiCrease'],
                 },
                 cycle_phase: {
                     platform: 'sensor',
@@ -273,7 +275,7 @@ export default class Device extends AABBDevice {
                     name: 'Stage',
                     icon: 'mdi:washing-machine',
                     device_class: 'enum',
-                    options: ['Off', 'Washing', 'Rinsing', 'Spinning', 'Done'],
+                    options: ['Off', 'Paused', 'Washing', 'Rinsing', 'Spinning', 'Done'],
                 },
             },
         });
@@ -331,6 +333,20 @@ export default class Device extends AABBDevice {
             }
             return;
         }
+        // Info-class status packets (inner[8]=0x02, ST=0x03) carry a sub-state
+        // code at inner[13], mirrored at inner[17]: 0x11 idle-browse, 0x1e
+        // pre-detect, 0x01 detecting, 0x0b detergent input, 0x0c pause
+        // (correlated with cloud state PAUSE, captured 2026-06-11). Only 0x0c
+        // is a pause — the others occur during a normal running cycle, so a
+        // blanket ST=0x03→Paused mapping (the dryer's rule) would be wrong here.
+        if (inner.length >= 18 && inner[8] === 0x02 && inner[10] === 0x03 && inner[13] === 0x0c && inner[17] === 0x0c) {
+            if (this.getProperty('stage') !== 'Paused') {
+                this.stageBeforePause = this.getProperty('stage') ?? 'Off';
+            }
+            this.publishProperty('run_state', 'Paused');
+            this.publishProperty('stage', 'Paused');
+            return;
+        }
         const st = inner[10];
         const stateLabel = STATES_VCDWL[st];
         // Unknown ST bytes (e.g. 0x4d telemetry bursts) — suppress rather than
@@ -348,6 +364,10 @@ export default class Device extends AABBDevice {
         // so the broker's retained message is corrected.
         if (st !== 0xeb) {
             this.publishProperty('run_state', stateLabel);
+            // Resume after pause: restore the stage shown before pausing.
+            if (st === 0xec && this.getProperty('stage') === 'Paused') {
+                this.publishProperty('stage', this.stageBeforePause);
+            }
         }
         else {
             const cached = this.getProperty('run_state');
