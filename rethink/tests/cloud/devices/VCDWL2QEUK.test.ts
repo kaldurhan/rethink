@@ -184,6 +184,22 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
     })
 
+    test('running packet sets stage=Washing even when phase decodes as Idle (Eco 40-60 0x__0e tuples)', () => {
+        // Live bug 2026-06-11: Eco 40-60 emits 0x030e-family tuples while
+        // running (mapped to Idle), so keying Washing on phase==='Tumble'
+        // left stage stuck on Off for the whole cycle.
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x03, 0x0e, 0x09, 0x13, 0x67, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+    })
+
+    test('running packet with unknown phase tuple still sets stage=Washing before first spin ramp', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x0b, 0x02, 0x09, 0x13, 0x67, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+    })
+
     test('run_state and stage enum options include Paused', () => {
         const { ha } = makeDevice()
         const cfg = ha.devices[DEVICE_ID].config?.components as Record<string, Record<string, unknown>>

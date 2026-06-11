@@ -412,7 +412,11 @@ export default class Device extends AABBDevice {
         this.publishProperty('cycle_phase', phase)
         this.lastTumbleTime = Date.now()
 
-        if (st === 0xec && phase === 'Tumble' && this.spinRampsSeen === 0) {
+        // Any Running packet before the first spin ramp is the wash phase.
+        // Do not key this on a specific phase tuple: courses use different
+        // tuple families (Eco 40-60 emits 0x__0e codes that decode as Idle),
+        // and unmapped tuples decode as 'unknown' — stage must work regardless.
+        if (st === 0xec && this.spinRampsSeen === 0) {
             this.cancelOffTimer()
             this.publishProperty('stage', 'Washing')
         }
