@@ -67,17 +67,21 @@ The `processAABB(inner)` method receives the AABB packet with `aa ff` header and
 - ST=`0xeb`, phase byte A = `0x05`: TR = dryness level
 - ST=`0xeb`, phase byte A ≠ `0x05`: TR = drying mode
 
-**Phase tuple `[A, B]`:**
+**Phase tuple `[A, B]`** (full table in `PHASES`, `cloud/devices/RHX7009TWS.ts`):
 
-- `[05, 03]` = Idle, `[03, 09]` = Heating, `[07, 09]` = Drying, `[07, 10]` = Cooldown
-- NOTE: `[07, 01]` also observed for Drying in captures — not yet in PHASES table
+- `[05, 03]` = Idle, `[01, 00]` = Startup, `[03, 09]`/`[03, 07]` = Heating,
+  `[07, 01]`/`[07, 03]` = Drying, `[07, 10]`/`[07, 11]` = Cooldown,
+  `[11, 00]`/`[08, 11]` = Finishing
 
 ### Known gaps (accepted tech debt)
 
-- Phase `[07, 01]` → Drying not in PHASES table (shows `unknown (7 1)` for double-block running packets)
 - Course `0x21` labelled 'Auto Dry' — observed only in End packets, exact name unconfirmed
-- `drying_mode` branch (ST=`0xeb`, phA≠`0x05`) has no test coverage
-- No `device_class: 'enum'` + `options` on sensors (inconsistent with VCDWL2QEUK)
+  (check the panel during a live run)
+- `drying_mode` branch (ST=`0xeb`, phA≠`0x05`) is covered only by **synthetic** fixtures
+  (DISPLAY_ON_IDLE with phA/TR mutated) — no real capture of mode-browsing exists yet;
+  replace fixtures when one is taken
+- `npm test` waits out 5-minute `scheduleOff` timers before exiting (CI runs ~5m37s);
+  pass `--test-force-exit` for fast local runs
 
 ---
 

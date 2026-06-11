@@ -74,6 +74,19 @@ const FINISHED = buf(
     'aaff300a0058008e460001010400460303010105214009031e08dc000f00f0dc00000000000900000004000401f100f800000f111010000000001000f20001000000000100000000001a04f336481a20fc0cc0cd0c848bbb',
 )
 
+// Synthetic fixtures: no real capture of drying-mode browsing exists yet, so
+// these derive from DISPLAY_ON_IDLE with phA (inner[14]) forced ≠0x05 and TR
+// (inner[23]) set to a drying-mode byte. processData does not verify the
+// checksum, so byte mutation is safe. Replace with real captures when taken.
+function withInnerBytes(src: Buffer, edits: Record<number, number>): Buffer {
+    const copy = Buffer.from(src)
+    for (const [innerIdx, val] of Object.entries(edits)) copy[Number(innerIdx) + 2] = val
+    return copy
+}
+const DISPLAY_ON_MODE_TURBO = withInnerBytes(DISPLAY_ON_IDLE, { 14: 0x01, 23: 0x96 })
+const DISPLAY_ON_MODE_EFFICIENCY = withInnerBytes(DISPLAY_ON_IDLE, { 14: 0x01, 23: 0x46 })
+const DISPLAY_ON_MODE_UNKNOWN = withInnerBytes(DISPLAY_ON_IDLE, { 14: 0x01, 23: 0x12 })
+
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
@@ -135,6 +148,26 @@ describe(MODEL_ID, () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON_IDLE)
         assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Idle')
+    })
+
+    test('display-on with phA≠0x05 TR=0x96 → drying_mode=Turbo, dryness_level untouched', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DISPLAY_ON_MODE_TURBO)
+        assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, 'Turbo')
+        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, undefined)
+    })
+
+    test('display-on with phA≠0x05 TR=0x46 → drying_mode=Efficiency (same TR byte as Extra Dry dryness)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DISPLAY_ON_MODE_EFFICIENCY)
+        assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, 'Efficiency')
+        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, undefined)
+    })
+
+    test('display-on with phA≠0x05 and unmapped TR → drying_mode falls back to unknown hex', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DISPLAY_ON_MODE_UNKNOWN)
+        assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, 'unknown (0x12)')
     })
 
     test('display-on-idle → dryness_level=Extra Dry (TR=0x0046 in idle context)', () => {
