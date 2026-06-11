@@ -1,5 +1,6 @@
 import AABBDevice from './aabb_device.js';
 import HADevice from './base.js';
+import { WASHER_TABLE } from './stage_fsm.js';
 import log from '../../util/logging.js';
 // inner[10] — run state.
 const STATES_VCDWL = {
@@ -146,8 +147,6 @@ export default class Device extends AABBDevice {
         // seconds, so without this gate an unknown code floods the add-on log.
         this.loggedUnknownCourse = -1;
         this.loggedUnknownPhase = -1;
-        // Stage shown before a pause, restored when the cycle resumes.
-        this.stageBeforePause = 'Off';
         const courseOptions = [...Object.values(COURSES_VCDWL), 'unknown'];
         const phaseOptions = [
             'Idle',
@@ -279,9 +278,10 @@ export default class Device extends AABBDevice {
                 },
             },
         });
+        this.initStageFSM(WASHER_TABLE);
     }
     start() {
-        this.publishProperty('stage', 'Off');
+        this.publishProperty('stage', this.stageFsm.stage);
     }
     processAABB(inner) {
         if (inner.length < 11 || inner[0] !== 0x20)
@@ -320,14 +320,14 @@ export default class Device extends AABBDevice {
                 const isFinalSpin = Date.now() - this.lastTumbleTime > 90000;
                 if (isFinalSpin) {
                     this.publishProperty('cycle_phase', 'SpinRamp');
-                    this.publishProperty('stage', 'Spinning');
+                    this.stageFsm.dispatch('spinPhase');
                 }
                 else {
                     // Intermediate spin ramp during wash/rinse tumble
                     this.spinRampsSeen++;
                     if (this.spinRampsSeen === 1) {
                         // First spin ramp marks end of wash — rinse phase has begun
-                        this.publishProperty('stage', 'Rinsing');
+                        this.stageFsm.dispatch('rinsePhase');
                     }
                 }
             }
@@ -340,11 +340,8 @@ export default class Device extends AABBDevice {
         // is a pause — the others occur during a normal running cycle, so a
         // blanket ST=0x03→Paused mapping (the dryer's rule) would be wrong here.
         if (inner.length >= 18 && inner[8] === 0x02 && inner[10] === 0x03 && inner[13] === 0x0c && inner[17] === 0x0c) {
-            if (this.getProperty('stage') !== 'Paused') {
-                this.stageBeforePause = this.getProperty('stage') ?? 'Off';
-            }
             this.publishProperty('run_state', 'Paused');
-            this.publishProperty('stage', 'Paused');
+            this.stageFsm.dispatch('paused');
             return;
         }
         const st = inner[10];
@@ -364,10 +361,12 @@ export default class Device extends AABBDevice {
         // so the broker's retained message is corrected.
         if (st !== 0xeb) {
             this.publishProperty('run_state', stateLabel);
-            // Resume after pause: restore the stage shown before pausing.
-            if (st === 0xec && this.getProperty('stage') === 'Paused') {
-                this.publishProperty('stage', this.stageBeforePause);
-            }
+            if (st === 0xec)
+                this.stageFsm.dispatch('cycleActive');
+            if (st === 0x04 || st === 0xe2)
+                this.stageFsm.dispatch('ended');
+            if (st === 0x0b)
+                this.stageFsm.dispatch('standby');
         }
         else {
             const cached = this.getProperty('run_state');
@@ -376,13 +375,9 @@ export default class Device extends AABBDevice {
         }
         if (st === 0x04 || st === 0xe2) {
             this.publishProperty('remaining_time', 0);
-            this.publishProperty('stage', 'Done');
-            this.scheduleOff();
             this.spinRampsSeen = 0;
         }
         if (st === 0x0b) {
-            this.cancelOffTimer();
-            this.publishProperty('stage', 'Off');
             this.spinRampsSeen = 0;
         }
         if (!sub)
@@ -397,14 +392,6 @@ export default class Device extends AABBDevice {
         }
         this.publishProperty('cycle_phase', phase);
         this.lastTumbleTime = Date.now();
-        // Any Running packet before the first spin ramp is the wash phase.
-        // Do not key this on a specific phase tuple: courses use different
-        // tuple families (Eco 40-60 emits 0x__0e codes that decode as Idle),
-        // and unmapped tuples decode as 'unknown' — stage must work regardless.
-        if (st === 0xec && this.spinRampsSeen === 0) {
-            this.cancelOffTimer();
-            this.publishProperty('stage', 'Washing');
-        }
         const sp = sub[3];
         this.publishProperty('spin', SPINS_VCDWL[sp] ?? 0);
         const cs = sub[4];

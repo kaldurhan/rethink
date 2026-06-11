@@ -1,5 +1,7 @@
-import { describe, test } from 'node:test'
+import { describe, test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { rmSync, existsSync } from 'node:fs'
+import { storePath } from '@/cloud/devices/stage_store'
 import DUT from '@/cloud/devices/VCDWL2QEUK'
 import type { Metadata } from '@/cloud/thinq'
 import { MockHAConnection, MockThinq2Device, buf, captureLog } from '@/tests/helpers/mocks'
@@ -23,6 +25,13 @@ function makeDevice() {
 }
 
 describe(MODEL_ID, () => {
+    // Wipe persisted stage between tests — all devices use the same DEVICE_ID
+    // ('test-id') so state written in one test leaks into the next via stage-state.json.
+    beforeEach(() => {
+        const p = storePath()
+        if (existsSync(p)) rmSync(p)
+    })
+
     test('standby short packet sets run_state=Standby', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', STANDBY_1)
@@ -650,5 +659,35 @@ describe(MODEL_ID, () => {
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.cycle_phase, 'Drain')
         assert.equal(p.remaining_time, 5)
+    })
+
+    test('cancelled cycle (standby mid-wash) → stage Off, never Done', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x03, 0x0e, 0x09, 0x13, 0x67, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+        thinq.emit('data', STANDBY_1)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Off')
+    })
+
+    test('persisted active stage survives a device restart and still yields one Done', () => {
+        // Simulates: add-on goes down mid-wash, cycle ends, add-on returns and
+        // sees the AntiCrease packet. RETHINK_DATA_DIR is shared within the run.
+        const first = makeDevice()
+        first.thinq.emit('data', synthFrame(0x03, 0x0e, 0x09, 0x13, 0x67, 0x00))
+        assert.equal(first.ha.devices[DEVICE_ID].properties.stage, 'Washing')
+
+        const second = makeDevice() // fresh instance, same device id
+        second.dev.start()
+        assert.equal(second.ha.devices[DEVICE_ID].properties.stage, 'Washing') // restored, not Off
+        second.thinq.emit('data', ANTI_CREASE_END)
+        assert.equal(second.ha.devices[DEVICE_ID].properties.stage, 'Done')
+    })
+
+    test('retained End replay while Off does not produce Done', () => {
+        const { ha, thinq, dev } = makeDevice()
+        dev.start()
+        thinq.emit('data', STANDBY_1) // ensure Off persisted for this id
+        thinq.emit('data', END_OF_CYCLE) // stray End packet while Off
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Off')
     })
 })

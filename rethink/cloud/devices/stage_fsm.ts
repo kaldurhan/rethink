@@ -19,7 +19,10 @@ export type TransitionTable = Record<string, Partial<Record<StageEvent, Stage>>>
 // Entries mapping to the same state are expected repeats (silent no-ops).
 // Missing entries are illegal events: ignored, dedup-logged.
 export const WASHER_TABLE: TransitionTable = {
-    Off: { cycleActive: 'Washing', standby: 'Off', offTimeout: 'Off' },
+    // paused: 'Paused' in Off handles a broker-retained Pause packet replayed on
+    // add-on restart (device was paused when the add-on went down). pausedFrom will
+    // be null, so resume falls back to Off.cycleActive = 'Washing'.
+    Off: { cycleActive: 'Washing', paused: 'Paused', standby: 'Off', offTimeout: 'Off' },
     Washing: { cycleActive: 'Washing', rinsePhase: 'Rinsing', spinPhase: 'Spinning', ended: 'Done', standby: 'Off' },
     Rinsing: { cycleActive: 'Rinsing', rinsePhase: 'Rinsing', spinPhase: 'Spinning', ended: 'Done', standby: 'Off' },
     Spinning: { cycleActive: 'Spinning', spinPhase: 'Spinning', ended: 'Done', standby: 'Off' },
@@ -29,7 +32,8 @@ export const WASHER_TABLE: TransitionTable = {
 }
 
 export const DRYER_TABLE: TransitionTable = {
-    Off: { cycleActive: 'Heating', standby: 'Off', offTimeout: 'Off' },
+    // paused: 'Paused' in Off handles broker-retained Pause replayed on restart.
+    Off: { cycleActive: 'Heating', paused: 'Paused', standby: 'Off', offTimeout: 'Off' },
     Heating: {
         cycleActive: 'Heating',
         heatPhase: 'Heating',
