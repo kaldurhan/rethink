@@ -169,10 +169,11 @@ function findStatusSubBlock(inner: Buffer): number {
 }
 
 export default class Device extends AABBDevice {
-    // Timestamp of the last 0x76 sub-block decode. Used to gate 0x53 SpinRamp
-    // publishes: during active tumble, 0x76 fires every ~60s so this stays fresh;
-    // during the final drain+spin, no 0x76 arrives for 15+ min so 0x53 is allowed
-    // to update cycle_phase to SpinRamp.
+    // Timestamp of the last tumble-class 0x76 sub-block decode (see
+    // TUMBLE_ACTIVITY). Gates the 0x53 final-spin heuristic: during active
+    // tumble, 0x76 fires every ~60 s so this stays fresh; during the final
+    // drain+spin no tumble packet arrives for 15+ min, so a 0x53 ramp after
+    // >90 s of silence dispatches the stage spinPhase event.
     lastTumbleTime = 0
     // Count of intermediate spin-ramp events seen in the current cycle.
     // 0 = still in wash phase; ≥1 = rinse phase has begun.
