@@ -207,12 +207,21 @@ export default class Device extends AABBDevice {
         // Startup (0x0100 — identical to the first ~8 s of a real cycle).
         let phase: string | null = null
         let phA = 0
+        let knownPhase = false
         if (inner.length >= 24) {
             phA = hasSub2 ? inner[sub2Start + 13] : inner[14]
             const phB = hasSub2 ? inner[sub2Start + 14] : inner[15]
+            knownPhase = ((phA << 8) | phB) in PHASES
             phase = decodePhase(phA, phB)
         }
         const isSelection = st === 0xec && phase !== null && (phase === 'Idle' || phase === 'Startup')
+        // ST=0xec with an unmapped phase tuple is mid-transition chatter, not
+        // proof of drum activity (live 2026-06-11 18:51: the anti-crease tumble
+        // broadcast tuple (04,00) with TR=1 five seconds after cycle end,
+        // restarting the FSM from Done and producing a duplicate Done edge).
+        // Such packets may not claim Running, drive the stage machine, or
+        // update remaining_time — phase/program still publish for diagnostics.
+        const isUnknownRunning = st === 0xec && phase !== null && !knownPhase
 
         // DisplayOn (0xeb) and selection chatter are transient user-browsing;
         // keep the last meaningful state. Empty cache or stale 'DisplayOn'
@@ -220,7 +229,7 @@ export default class Device extends AABBDevice {
         // corrected. Cost of the selection gate: run_state lags ~8 s at a real
         // cycle start (until the first Heating/Drying packet) — stage drives
         // the automations, so this is cosmetic.
-        if (st !== 0xeb && !isSelection) {
+        if (st !== 0xeb && !isSelection && !isUnknownRunning) {
             this.publishProperty('run_state', stateLabel)
         } else {
             const cached = this.getProperty('run_state')
@@ -245,11 +254,13 @@ export default class Device extends AABBDevice {
         this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
         this.publishProperty('phase', phase)
 
-        if (st === 0xec) {
+        if (st === 0xec && !isUnknownRunning) {
             // Idle (selection display) and Startup (0x0100 — broadcast both
             // while a programme is merely selected AND for the first ~8 s of a
             // real cycle) must not start the stage machine; the first
-            // Heating/Drying packet starts the cycle moments later.
+            // Heating/Drying packet starts the cycle moments later. With
+            // unknown tuples gated above, only positively identified active
+            // phases reach cycleActive.
             if (phase !== 'Idle' && phase !== 'Startup') this.stageFsm!.dispatch('cycleActive')
             if (phase === 'Heating') this.stageFsm!.dispatch('heatPhase')
             else if (phase === 'Drying') this.stageFsm!.dispatch('dryPhase')
@@ -257,7 +268,7 @@ export default class Device extends AABBDevice {
         }
 
         // TR interpretation is ST-dependent
-        if (st === 0xec) {
+        if (st === 0xec && !isUnknownRunning) {
             this.publishProperty('remaining_time', tr)
         } else if (st === 0xeb) {
             // DisplayOn: phA=0x05 → dryness level; otherwise → drying mode

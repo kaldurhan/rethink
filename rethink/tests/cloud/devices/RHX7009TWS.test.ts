@@ -72,6 +72,22 @@ const ANTI_CREASE = buf(
     'aaff300a0045008e4000010ae20033000003000009000000001e001e0701000200e3040900000000004081050000000000000000000000000000640004007800000046f9bb',
 )
 
+// Captured live 2026-06-11 18:51:23 — five seconds after the AntiCrease packet
+// ended the cycle, the dryer emitted a double-block Running packet whose
+// authoritative sub2 carries TR=1 (defeating the TR=0 post-cycle-tumble guard)
+// and the unknown phase tuple (04,00) — anti-crease chatter mid-transition.
+// On 1.0.59 this restarted the stage machine (Done → Heating) and the End
+// packet 21 s later produced a second Done edge.
+const ANTICREASE_TUMBLE_TR1 = buf(
+    'aaff300a007800b8f0000100ec00660000030000090000000001001e0811000500fa04090000000000408105000000000000000000000000000064000400780000000000030000090000000001001e0400000700fc0409000000200000810500000000000000000000000000006400040078000000a5a2bb',
+)
+
+// Captured live 2026-06-11 18:51:44 — the End packet that followed the
+// anti-crease tumble above (course 0x21 'Auto Dry', same as FINISHED).
+const FINISHED_AUTODRY = buf(
+    'aaff300a005800b8f40001010400460303010105214009031e09dc000f00f0dc00000000000900000004000401f1010300000f111010000000101000f20001000000000100000000001a04f336481a24e40cc0cd0c1fb4bb',
+)
+
 const FINISHED = buf(
     'aaff300a0058008e460001010400460303010105214009031e08dc000f00f0dc00000000000900000004000401f100f800000f111010000000001000f20001000000000100000000001a04f336481a20fc0cc0cd0c848bbb',
 )
@@ -374,6 +390,33 @@ describe(MODEL_ID, () => {
         assert.equal(p.program, 'Quick Dry 30')
         assert.equal(p.remaining_time, 30)
         assert.equal(p.phase, 'Drying')
+    })
+
+    test('anti-crease tumble with TR=1 + unknown phase keeps stage latched at Done (live 2026-06-11 18:51)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', ANTI_CREASE)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Done')
+        thinq.emit('data', ANTICREASE_TUMBLE_TR1)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Done', 'unknown phase must not restart the cycle')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'AntiCrease', 'unknown phase must not claim Running')
+        thinq.emit('data', FINISHED_AUTODRY)
+        assert.equal(
+            ha.devices[DEVICE_ID].properties.stage,
+            'Done',
+            'End after spurious restart must not yield a second Done edge',
+        )
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'End')
+    })
+
+    test('unknown phase mid-cycle leaves stage and run_state untouched', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', ANTICREASE_TUMBLE_TR1)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 
     test('persisted active stage survives restart; End yields exactly one Done', () => {
