@@ -16,6 +16,11 @@ const STATES_VCDWL: Record<number, string> = {
 }
 
 // sub[4] — course code. sub[5] is always 0x00 (the LE high byte).
+// All 15 entries cloud-correlated live during the full programme-knob scroll
+// 2026-06-11 19:40 (capture: program-scroll-2026-06-11-*). Cloud names:
+// MIX, TURBO39, SPORTS_WEARS, TUB_CLEAN, SPEED14, WOOL, NORMAL, AI_COURSE,
+// COTTONECO, DELICATES, EASYCARE, MICROPLASTIC_CARE, ALLERGY_SPASTEAM,
+// RINSE_SPIN, SPIN_ONLY.
 const COURSES_VCDWL: Record<number, string> = {
     0x2b: 'Blandmaterial',
     0x7a: 'Turbowash 39',
@@ -30,6 +35,8 @@ const COURSES_VCDWL: Record<number, string> = {
     0x1d: 'Strykfritt',
     0x88: 'Skötsel av mikroplaster',
     0x04: 'Allergivård',
+    0x37: 'Sköljning + Centrifugering',
+    0x4e: 'Centrifugering',
 }
 
 // sub[1] (phA) — temperature index (programme-agnostic).
@@ -365,16 +372,19 @@ export default class Device extends AABBDevice {
         const subStart = inner.length >= 32 ? findStatusSubBlock(inner) : -1
         const sub = subStart >= 0 ? inner.subarray(subStart, subStart + 21) : null
 
-        // Post-cycle: ST=Running but phase=Finished (0x0000 or 0x100e both observed).
-        // Suppress so End/AntiCrease stays visible in HA.
-        if (st === 0xec && sub && decodePhase(sub[1], sub[2]) === 'Finished') return
-
         // ST=0xec also broadcasts while a programme is merely selected on the
         // panel (drum off). Selection blocks end in the terminator (01,00) at
         // sub[20..21]; running blocks carry drum-activity codes there. Short
         // packets (no sub-block) only occur mid-cycle.
         const isSelectionBlock =
             st === 0xec && sub !== null && inner[subStart + 20] === 0x01 && inner[subStart + 21] === 0x00
+
+        // Post-cycle: ST=Running but phase=Finished (0x0000 or 0x100e both
+        // observed; terminator (10,0e)). Suppress so End/AntiCrease stays
+        // visible in HA. Selection blocks are exempt: courses without a
+        // temperature (Centrifugering, disp=(00,00)) collide with the
+        // Finished display tuple while browsing (live 2026-06-11 knob scroll).
+        if (st === 0xec && sub && !isSelectionBlock && decodePhase(sub[1], sub[2]) === 'Finished') return
 
         if (st !== 0xeb && !isSelectionBlock) {
             this.publishProperty('run_state', stateLabel)

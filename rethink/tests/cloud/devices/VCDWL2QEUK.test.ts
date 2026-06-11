@@ -653,6 +653,27 @@ describe(MODEL_ID, () => {
         assert.equal(thinq.outbox.length, 0, 'no packets emitted from HA writes')
     })
 
+    // Captured live 2026-06-11 19:40 during the full programme-knob scroll,
+    // cloud-correlated in real time: 0x37 = RINSE_SPIN (Sköljning +
+    // Centrifugering), 0x4e = SPIN_ONLY (Centrifugering). Selection packets;
+    // current course is in the trailing sub-block.
+    const SELECTION_RINSE_SPIN = buf(
+        'aaff200a0076002584000100ec00640003050e09040000000000000000a800a8000000040100000000000109040100755a001000020004180000000000000400000000000e09370000000000000000130013000000370100000900000109040100755a0000000200041800000000000004000083e4bb',
+    )
+    const SELECTION_SPIN_ONLY = buf(
+        'aaff200a0076002585000100ec00640000000e09370000000000000000130013000000370100000900000109040100755a0000000200041800000000000004000000000000094e00000000000000000e000e0000004e0100000900000009040100755a00000002000418000000000000040000300bbb',
+    )
+
+    test('knob-scroll selection decodes Sköljning + Centrifugering (0x37) and Centrifugering (0x4e)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', SELECTION_RINSE_SPIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.course, 'Sköljning + Centrifugering')
+        thinq.emit('data', SELECTION_SPIN_ONLY)
+        assert.equal(ha.devices[DEVICE_ID].properties.course, 'Centrifugering')
+        // selection only — the stage machine must stay off
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
+
     test('standby packet after display-on does not clobber prior course/spin/temp', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON)
