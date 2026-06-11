@@ -5,18 +5,110 @@
 A fork of [anszom/rethink](https://github.com/anszom/rethink) — a local protocol bridge for LG ThinQ appliances. It intercepts ThinQ cloud traffic and translates it to MQTT, so appliances work locally without the LG cloud. Runs as a Home Assistant addon.
 
 **Repo:** https://github.com/kaldurhan/rethink  
-**Working directory (WSL):** `/tmp/rethink/rethink`  
-**HA addon slug:** `rethink`  
-**GHCR image:** `ghcr.io/kaldurhan/rethink`
+**Working directory (WSL):** `/home/zorgin/project/rethink/rethink`  
+**HA addon slug:** `rethink` (store slug `daf7d2b6_rethink`)  
+**GHCR image:** `ghcr.io/kaldurhan/rethink`  
+**Deployed version:** 1.0.59 (2026-06-11)
 
 ---
 
 ## Appliances integrated
 
-| Device                     | ThinQ model ID | File                          | Status                 |
-| -------------------------- | -------------- | ----------------------------- | ---------------------- |
-| LG F4X7511TWS washer       | `VCDWL2QEUK`   | `cloud/devices/VCDWL2QEUK.ts` | ✅ Complete, 202 tests |
-| LG RHX7009TWS tumble dryer | `SDH_X7_7008`  | `cloud/devices/RHX7009TWS.ts` | ✅ Complete, 15 tests  |
+| Device                     | ThinQ model ID | File                          | Status      |
+| -------------------------- | -------------- | ----------------------------- | ----------- |
+| LG F4X7511TWS washer       | `VCDWL2QEUK`   | `cloud/devices/VCDWL2QEUK.ts` | ✅ Complete |
+| LG RHX7009TWS tumble dryer | `SDH_X7_7008`  | `cloud/devices/RHX7009TWS.ts` | ✅ Complete |
+
+Suite: 294 tests, plain `npm test`, ~2 s.
+
+---
+
+## Stage state machine (built + shipped 2026-06-11, v1.0.55–1.0.59)
+
+Spec: `/home/zorgin/project/docs/superpowers/specs/2026-06-11-laundry-state-machine-design.md`
+(plan next to it in `plans/`). Goal: exactly-once Done notifications.
+
+### Architecture
+
+- **`cloud/devices/stage_fsm.ts`** — `StageFSM` owns ALL `stage` transitions via
+  explicit per-device transition tables (`WASHER_TABLE`, `DRYER_TABLE`).
+  Devices translate packets into events (`cycleActive`, `rinsePhase`,
+  `spinPhase`, `heatPhase`, `dryPhase`, `coolPhase`, `paused`, `ended`,
+  `standby`, `offTimeout`). Guards: Done latches (exactly one edge per cycle),
+  `ended` while Off is ignored+logged, backward transitions ignored+logged
+  (dedup), pause remembers the prior stage and restores it on resume.
+- **`cloud/devices/stage_store.ts`** — stage persisted to
+  `/data/stage-state.json` (test override: `RETHINK_DATA_DIR`); restored on
+  boot, so a cycle ending while the add-on is down yields one late Done.
+- **`aabb_device.ts`** — `initStageFSM(table)`: persistence + publish +
+  Done→Off fallback timer centralised in the FSM onChange.
+- MQTT contract unchanged: entity IDs and enum values are the same; `Paused`
+  added to washer run_state/stage enums.
+
+### Selection-state gating (the validation-day discoveries)
+
+Both machines broadcast **ST=0xec ("Running") while a programme is merely
+selected on the panel** — drum off. Three rules prevent false states:
+
+1. **Washer:** selection status-blocks end in terminator `(01,00)` at
+   `sub[20..21]`; running blocks carry drum-activity codes there. Both
+   `cycleActive` and `run_state` are gated on this signature (selection is
+   treated like DisplayOn: keep last meaningful state, fall back to Standby).
+2. **Dryer:** selection packets carry phase tuple `0x0100` (Startup) — byte-
+   identical to the first ~8 s of a real cycle. Neither Idle nor Startup
+   starts the stage machine or claims Running; the first Heating/Drying packet
+   does. Deliberate trade-off: dryer `run_state` lags ~8 s at a real start.
+3. **Dryer info-class ST=0x03 sub-state codes** (at `inner[13]`, mirrored at
+   `inner[17]`, same layout as the washer): `0x0c` panel pause, `0x07`
+   mid-cycle door-open pause, `0x10` idle door event, `0x0e` idle panel event.
+   Only 0x0c/0x07 publish Paused. Washer codes: `0x0c` pause, `0x0b`
+   detergent input, `0x01` detecting, `0x11` idle-browse, `0x1e` pre-detect.
+
+All of these were found live (watchdog alarm / frozen states within minutes of
+deployment) and each has the actual captured packet as a regression fixture.
+
+### Two phase fields per washer status block (important for future decoding)
+
+`sub[1..2]` is a **display/selection code** (temp index + settled marker —
+frozen at e.g. `(03,0e)` for an entire Eco 40-60 cycle), while the real drum
+activity progresses at **`sub[20..21]`** (Eco sequence observed:
+`(03,01)→(26,03)→(02,26)→(0b,02)→(26,0b)↔(0b,26)→(0c,0b)→(0e,0c)→(10,0e)`).
+The current PHASES_VCDWL table mixes both namespaces — the planned
+**cycle_phase rework** should decode activity from `sub[20..21]`. Full-cycle
+raw capture + decoded timeline: `/home/zorgin/rethink-captures/` (also
+committed as the replay fixture `tests/fixtures/eco-cycle-raw.ndjson`).
+One locator mis-pick observed at 11:51:12 in that capture (blk@73, garbage
+course) — worth a guard during the rework.
+
+### HA side (repo `/home/zorgin/project`)
+
+- `ha-automations/tvattmaskin_refactored.yaml` / `torktumlare_refactored.yaml`
+  — cykelhanterare with restart-safe START (accepts unknown/unavailable from-
+  states, blocks resumes), guarded FINISH (`start_kwh > 0`), washer pause-
+  duration tracking. `laundry_watchdog.yaml` — power-meter cross-check
+  (>10 W 5 min while stage Off = missed start; <4 W 15 min while active =
+  missed end; Paused excluded). Imported into HA 2026-06-11.
+- Dashboard (ha-dashboard repo): washer `displayStates` gained `Paused`
+  (deployed v1.157). `yaml-check.sh` now handles multi-document files.
+
+### Validation status
+
+- ✅ Idle interactions (door/panel/power on both machines) end at
+  run_state=Standby, stage=Off — user-verified on 1.0.59.
+- ⏳ First real wash + dry on the new stack: expect exactly one
+  `tvattmaskin_klar`/`torktumlare_klar` notification each, watchdog silent.
+
+### Open follow-ups
+
+- cycle_phase rework using activity codes (capture data ready, see above).
+- Washer door sensor false-open: a 0x63-byte-long info packet collides with
+  the `packetType === 0x63` door intercept; real door events may be the short
+  `aa 08 20 …` frames (currently discarded as <11 bytes). Needs an idle
+  door-open capture of the WASHER.
+- Washer FINISH doesn't subtract a still-open pause if the cycle ends while
+  Paused (dryer handles this; washer accuracy nit).
+- Dryer course `0x21` "Auto Dry" name unconfirmed; drying_mode fixtures still
+  synthetic.
 
 ---
 
@@ -102,7 +194,7 @@ Use `cloud/devices/VCDWL2QEUK.ts` as the reference for washer-type devices.
 
 ```bash
 # Run tests
-cd /tmp/rethink/rethink && npm test
+cd /home/zorgin/project/rethink/rethink && npm test
 
 # Run only one device's tests
 npm test 2>&1 | grep -A2 "RHX7009TWS"
