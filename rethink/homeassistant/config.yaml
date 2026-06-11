@@ -5,7 +5,7 @@ description: >-
     Local protocol translator for LG ThinQ appliances. Replaces the LG cloud
     with a direct local MQTT bridge — no cloud required after initial setup.
     Supports ThinQ1 and ThinQ2 devices. Includes ability to pair Wi-Fi from HAOS.
-version: '1.0.57'
+version: '1.0.58'
 slug: 'rethink'
 url: 'https://github.com/anszom/rethink/wiki/Installing-rethink%E2%80%90cloud'
 init: false
