@@ -8,7 +8,7 @@ A fork of [anszom/rethink](https://github.com/anszom/rethink) — a local protoc
 **Working directory (WSL):** `/home/zorgin/project/rethink/rethink`  
 **HA addon slug:** `rethink` (store slug `daf7d2b6_rethink`)  
 **GHCR image:** `ghcr.io/kaldurhan/rethink`  
-**Deployed version:** 1.0.60 (2026-06-11)
+**Deployed version:** 1.0.61 (2026-06-11)
 
 ---
 
@@ -58,11 +58,19 @@ selected on the panel** — drum off. Three rules prevent false states:
    identical to the first ~8 s of a real cycle. Neither Idle nor Startup
    starts the stage machine or claims Running; the first Heating/Drying packet
    does. Deliberate trade-off: dryer `run_state` lags ~8 s at a real start.
-3. **Dryer info-class ST=0x03 sub-state codes** (at `inner[13]`, mirrored at
-   `inner[17]`, same layout as the washer): `0x0c` panel pause, `0x07`
-   mid-cycle door-open pause, `0x10` idle door event, `0x0e` idle panel event.
-   Only 0x0c/0x07 publish Paused. Washer codes: `0x0c` pause, `0x0b`
-   detergent input, `0x01` detecting, `0x11` idle-browse, `0x1e` pre-detect.
+3. **Dryer info-class ST=0x03 codes** (at `inner[13]`, mirrored at
+   `inner[17]`): the code's meaning is keyed by the sub-block length at
+   `inner[12]`. User events arrive in short packets (`[12]=0x16`, len 77–81:
+   `0x0c` panel pause, `0x10` idle door, `0x12` cooldown chime; `[12]=0x1e`,
+   len 85: `0x0e` idle panel). The len=96 shape (`[12]=0x29`) carries a
+   **progress counter** (walked 0x07→0x08→0x09 across a live cycle) — its
+   0x07 was misread as a door-open pause code until first-cycle validation
+   caught a 1-s spurious Paused mid-Drying (door untouched, user-confirmed).
+   Since 1.0.61, Paused requires the user-event shape AND code 0x0c/0x07;
+   0x07's true meaning awaits a real mid-cycle door-pause capture. Washer
+   codes: `0x0c` pause, `0x0b` detergent input, `0x01` detecting, `0x11`
+   idle-browse, `0x1e` pre-detect — the washer may need the same shape audit
+   (no spurious pause observed live yet).
 
 All of these were found live (watchdog alarm / frozen states within minutes of
 deployment) and each has the actual captured packet as a regression fixture.
@@ -108,10 +116,14 @@ course) — worth a guard during the rework.
   run_state claim, no FSM events, no remaining_time); both packets are
   regression fixtures. Monitor log + raw captures:
   `/home/zorgin/rethink-captures/validation-2026-06-11-*`.
-- ⏳ Re-validate one full wash+dry on 1.0.60 (expect clean exactly-once on
-  the dryer too). During the 18:41 dry a 1-s Paused blip appeared from a
-  genuine info-class door-pause code 0x07 — ask the user whether the dryer
-  door was briefly opened; if not, code 0x07 may need debouncing.
+- ❌→fixed: during the same dry, a 1-s spurious Paused blip at 18:41:57
+  (door untouched, user-confirmed) — the len=96 info-packet progress counter
+  reading 0x07 collided with the pause code set. Fixed in 1.0.61: pause
+  codes are gated on the user-event packet shape (`inner[12]=0x16`); see
+  selection-gating rule 3 above.
+- ⏳ Re-validate one full wash+dry on 1.0.61 (expect clean exactly-once on
+  the dryer, no Paused blips). Re-arm
+  `/home/zorgin/rethink-captures/monitor-validation-cycle.mjs` for the run.
 
 ### Open follow-ups
 
@@ -124,6 +136,10 @@ course) — worth a guard during the rework.
   Paused (dryer handles this; washer accuracy nit).
 - Dryer course `0x21` "Auto Dry" name unconfirmed; drying_mode fixtures still
   synthetic.
+- Capture a real mid-cycle dryer door-open pause to learn its actual code
+  (0x07 in the pause set is currently an unverified guess, shape-gated).
+- Audit the washer's info-class pause gate for the same shape-dependence
+  (`inner[12]` sub-block length) found on the dryer.
 
 ---
 
