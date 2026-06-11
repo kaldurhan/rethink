@@ -146,7 +146,7 @@ describe(MODEL_ID, () => {
 
     test('display-on during running → run_state stays Running (cache-check guards mid-cycle)', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        thinq.emit('data', DRYING_TR29) // real mid-cycle packet establishes Running
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
         thinq.emit('data', DISPLAY_ON_IDLE)
         // Cache has 'Running' → DisplayOn must not overwrite it.
@@ -185,12 +185,23 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, 'Extra Dry')
     })
 
-    test('quick-dry-30 selected → run_state=Running, program=Quick Dry 30', () => {
+    test('quick-dry-30 selected → run_state falls back to Standby, program=Quick Dry 30', () => {
+        // Selection chatter (ST=0xec, phase Idle/Startup) is treated like
+        // DisplayOn since the trailing-selection-packet freeze observed live
+        // 2026-06-11: fresh cache → Standby, never Running.
         const { ha, thinq } = makeDevice()
         thinq.emit('data', QUICK_DRY_30_SELECTED)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.run_state, 'Running')
+        assert.equal(p.run_state, 'Standby')
         assert.equal(p.program, 'Quick Dry 30')
+    })
+
+    test('trailing selection packet after standby does not flip run_state back to Running', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', STANDBY)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
     })
 
     // Captured live 2026-06-11 14:54 — door open/close and panel power on the
@@ -239,11 +250,15 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Drying')
     })
 
-    test('startup phase (0x0100) TR=70 → run_state=Running, phase=Startup, remaining_time=70', () => {
+    test('startup phase (0x0100) TR=70 → run_state lags at Standby, phase=Startup, remaining_time=70', () => {
+        // Startup (0x0100) is byte-identical to programme selection, so
+        // run_state deliberately lags ~8 s at a real cycle start: it stays
+        // Standby until the first Heating/Drying packet. Stage drives the
+        // automations, so the lag is cosmetic.
         const { ha, thinq } = makeDevice()
         thinq.emit('data', STARTUP_TR70)
         const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.run_state, 'Running')
+        assert.equal(p.run_state, 'Standby')
         assert.equal(p.phase, 'Startup')
         assert.equal(p.remaining_time, 70)
         assert.equal(p.program, 'Mixed Fabrics')
@@ -279,7 +294,7 @@ describe(MODEL_ID, () => {
 
     test('info-class ST=0x03 while running → run_state=Paused (not Cooldown)', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        thinq.emit('data', DRYING_TR29) // real mid-cycle packet establishes Running
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
         thinq.emit('data', PAUSED_INFO_CLASS)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
@@ -336,7 +351,7 @@ describe(MODEL_ID, () => {
 
     test('unknown ST byte is suppressed — last known state preserved', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        thinq.emit('data', DRYING_TR29) // real mid-cycle packet establishes Running
         // Mutate ST byte (inner[10] = buf[12]) to an unmapped value
         const unknown = Buffer.from(QUICK_DRY_30_SELECTED)
         unknown[12] = 0x4d
@@ -346,8 +361,8 @@ describe(MODEL_ID, () => {
 
     test('publishProperty deduplication — same packet twice only publishes once', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', QUICK_DRY_30_SELECTED)
-        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        thinq.emit('data', DRYING_TR29)
+        thinq.emit('data', DRYING_TR29)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
     })
 

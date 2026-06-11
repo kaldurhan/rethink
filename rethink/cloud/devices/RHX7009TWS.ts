@@ -202,10 +202,25 @@ export default class Device extends AABBDevice {
             return
         }
 
-        // DisplayOn (0xeb) is transient user-browsing; keep the last meaningful state.
-        // Exception: empty cache or stale 'DisplayOn' retained value → publish Standby
-        // so the broker's retained message is corrected.
-        if (st !== 0xeb) {
+        // Phase is needed before run_state: ST=0xec also broadcasts during
+        // programme selection (drum off), where the tuple decodes to Idle or
+        // Startup (0x0100 — identical to the first ~8 s of a real cycle).
+        let phase: string | null = null
+        let phA = 0
+        if (inner.length >= 24) {
+            phA = hasSub2 ? inner[sub2Start + 13] : inner[14]
+            const phB = hasSub2 ? inner[sub2Start + 14] : inner[15]
+            phase = decodePhase(phA, phB)
+        }
+        const isSelection = st === 0xec && phase !== null && (phase === 'Idle' || phase === 'Startup')
+
+        // DisplayOn (0xeb) and selection chatter are transient user-browsing;
+        // keep the last meaningful state. Empty cache or stale 'DisplayOn'
+        // retained value → publish Standby so the broker's retained message is
+        // corrected. Cost of the selection gate: run_state lags ~8 s at a real
+        // cycle start (until the first Heating/Drying packet) — stage drives
+        // the automations, so this is cosmetic.
+        if (st !== 0xeb && !isSelection) {
             this.publishProperty('run_state', stateLabel)
         } else {
             const cached = this.getProperty('run_state')
@@ -216,32 +231,18 @@ export default class Device extends AABBDevice {
             this.publishProperty('remaining_time', 0)
         }
 
-        // cycleActive for full Running packets is dispatched below, after the
-        // phase decode: ST=0xec also broadcasts during programme selection
-        // (drum off, phase Idle) and must not start the stage machine. Short
-        // Running packets carry no phase but only occur mid-cycle.
+        // Short Running packets carry no phase but only occur mid-cycle.
         if (st === 0xec && inner.length < 24) this.stageFsm!.dispatch('cycleActive')
         if (st === 0x04 || st === 0xe2 || st === 0x03) this.stageFsm!.dispatch('ended')
         if (st === 0x0b) this.stageFsm!.dispatch('standby')
 
         // Short/standby packet — leave other properties untouched
-        if (inner.length < 24) return
+        if (inner.length < 24 || phase === null) return
 
         const csOffset = hasSub2 ? sub2Start + 5 : 18
         const cs = inner[csOffset]
 
-        let phA: number
-        let phB: number
-        if (hasSub2) {
-            phA = inner[sub2Start + 13]
-            phB = inner[sub2Start + 14]
-        } else {
-            phA = inner[14]
-            phB = inner[15]
-        }
-
         this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
-        const phase = decodePhase(phA, phB)
         this.publishProperty('phase', phase)
 
         if (st === 0xec) {
