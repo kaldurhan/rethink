@@ -16,6 +16,7 @@ export function loadStageState(): Record<string, StageEntry> {
     }
 }
 
+// Safe read-modify-write only because all I/O is synchronous in a single-threaded process — do not convert to async without adding locking.
 export function saveStageState(id: string, entry: StageEntry) {
     try {
         const all = loadStageState()

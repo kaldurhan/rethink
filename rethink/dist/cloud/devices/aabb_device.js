@@ -1,11 +1,32 @@
 // base implementation for devices with a AA...BB payload format
 import HADevice from './base.js';
+import { StageFSM } from './stage_fsm.js';
+import { loadStageState, saveStageState } from './stage_store.js';
 export default class AABBDevice extends HADevice {
+    // Call from subclass constructor. Restores persisted stage, publishes it on
+    // start(), and centralizes the Done→Off fallback timer.
+    initStageFSM(table) {
+        const persisted = loadStageState()[this.thinq.id];
+        const initial = persisted?.stage ?? 'Off';
+        this.stageFsm = new StageFSM(this.thinq.id, table, initial, (stage) => {
+            this.publishProperty('stage', stage);
+            saveStageState(this.thinq.id, {
+                stage,
+                since: Date.now(),
+                lastDoneAt: stage === 'Done' ? Date.now() : (loadStageState()[this.thinq.id]?.lastDoneAt ?? null),
+            });
+            if (stage === 'Done')
+                this.scheduleOff();
+            else
+                this.cancelOffTimer();
+        });
+    }
     constructor(HA, thinq) {
         super(HA, thinq.id);
         this.thinq = thinq;
         this.publishCache = {};
         this.offTimer = null;
+        this.stageFsm = null;
         thinq.on('data', (data) => this.processData(data));
     }
     // sends a packet of the format:
@@ -39,7 +60,10 @@ export default class AABBDevice extends HADevice {
             clearTimeout(this.offTimer);
         this.offTimer = setTimeout(() => {
             this.offTimer = null;
-            this.publishProperty('stage', 'Off');
+            if (this.stageFsm)
+                this.stageFsm.dispatch('offTimeout');
+            else
+                this.publishProperty('stage', 'Off');
         }, delayMs);
     }
     cancelOffTimer() {

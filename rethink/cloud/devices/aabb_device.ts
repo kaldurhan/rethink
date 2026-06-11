@@ -2,11 +2,31 @@
 import HADevice from './base'
 import { Device as Thinq2Device } from '../thinq2/device'
 import { type Connection } from '../homeassistant'
+import { StageFSM, type TransitionTable } from './stage_fsm'
+import { loadStageState, saveStageState } from './stage_store'
 
 export default abstract class AABBDevice extends HADevice {
     publishCache: Record<string, string | number> = {}
 
     private offTimer: ReturnType<typeof setTimeout> | null = null
+    protected stageFsm: StageFSM | null = null
+
+    // Call from subclass constructor. Restores persisted stage, publishes it on
+    // start(), and centralizes the Done→Off fallback timer.
+    protected initStageFSM(table: TransitionTable) {
+        const persisted = loadStageState()[this.thinq.id]
+        const initial = persisted?.stage ?? 'Off'
+        this.stageFsm = new StageFSM(this.thinq.id, table, initial, (stage) => {
+            this.publishProperty('stage', stage)
+            saveStageState(this.thinq.id, {
+                stage,
+                since: Date.now(),
+                lastDoneAt: stage === 'Done' ? Date.now() : (loadStageState()[this.thinq.id]?.lastDoneAt ?? null),
+            })
+            if (stage === 'Done') this.scheduleOff()
+            else this.cancelOffTimer()
+        })
+    }
 
     constructor(
         HA: Connection,
@@ -52,7 +72,8 @@ export default abstract class AABBDevice extends HADevice {
         if (this.offTimer !== null) clearTimeout(this.offTimer)
         this.offTimer = setTimeout(() => {
             this.offTimer = null
-            this.publishProperty('stage', 'Off')
+            if (this.stageFsm) this.stageFsm.dispatch('offTimeout')
+            else this.publishProperty('stage', 'Off')
         }, delayMs)
     }
 

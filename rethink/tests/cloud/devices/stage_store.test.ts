@@ -19,6 +19,7 @@ describe('stage_store', () => {
         saveStageState('dev-b', { stage: 'Done', since: 222, lastDoneAt: 333 })
         const s = loadStageState()
         assert.equal(s['dev-a'].stage, 'Washing')
+        assert.equal(s['dev-a'].since, 111)
         assert.equal(s['dev-b'].lastDoneAt, 333)
     })
 
