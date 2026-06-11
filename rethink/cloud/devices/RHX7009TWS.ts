@@ -3,6 +3,7 @@ import { type Connection } from '../homeassistant'
 import { type Metadata } from '../thinq'
 import AABBDevice from './aabb_device'
 import HADevice from './base'
+import { DRYER_TABLE } from './stage_fsm'
 
 // ─── Lookup tables ────────────────────────────────────────────────────────────
 
@@ -131,23 +132,11 @@ export default class Device extends AABBDevice {
                 },
             },
         })
+        this.initStageFSM(DRYER_TABLE)
     }
 
     start() {
-        this.publishProperty('stage', 'Off')
-    }
-
-    private deriveStage(): string {
-        const runState = this.getProperty('run_state')
-        const phase = this.getProperty('phase')
-        if (runState === 'End' || runState === 'AntiCrease' || runState === 'Cooldown') return 'Done'
-        if (runState === 'Paused') return 'Paused'
-        if (runState === 'Running') {
-            if (phase === 'Startup' || phase === 'Heating') return 'Heating'
-            if (phase === 'Drying') return 'Drying'
-            if (phase === 'Cooldown' || phase === 'Finishing') return 'Cooling'
-        }
-        return 'Off'
+        this.publishProperty('stage', this.stageFsm!.stage)
     }
 
     processAABB(inner: Buffer) {
@@ -204,7 +193,7 @@ export default class Device extends AABBDevice {
         if (isInfoClass) {
             if (st === 0x03) {
                 this.publishProperty('run_state', 'Paused')
-                this.publishProperty('stage', 'Paused')
+                this.stageFsm!.dispatch('paused')
             }
             return
         }
@@ -223,12 +212,9 @@ export default class Device extends AABBDevice {
             this.publishProperty('remaining_time', 0)
         }
 
-        // Publish stage for terminal and idle states that may arrive as short packets
-        if (st === 0x0b || st === 0x04 || st === 0xe2) {
-            if (st === 0x0b) this.cancelOffTimer()
-            this.publishProperty('stage', this.deriveStage())
-            if (st === 0x04 || st === 0xe2) this.scheduleOff()
-        }
+        if (st === 0xec) this.stageFsm!.dispatch('cycleActive')
+        if (st === 0x04 || st === 0xe2 || st === 0x03) this.stageFsm!.dispatch('ended')
+        if (st === 0x0b) this.stageFsm!.dispatch('standby')
 
         // Short/standby packet — leave other properties untouched
         if (inner.length < 24) return
@@ -247,15 +233,17 @@ export default class Device extends AABBDevice {
         }
 
         this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
-        this.publishProperty('phase', decodePhase(phA, phB))
-        const stage = this.deriveStage()
-        this.publishProperty('stage', stage)
-        if (stage === 'Done') this.scheduleOff()
+        const phase = decodePhase(phA, phB)
+        this.publishProperty('phase', phase)
+
+        if (st === 0xec) {
+            if (phase === 'Startup' || phase === 'Heating') this.stageFsm!.dispatch('heatPhase')
+            else if (phase === 'Drying') this.stageFsm!.dispatch('dryPhase')
+            else if (phase === 'Cooldown' || phase === 'Finishing') this.stageFsm!.dispatch('coolPhase')
+        }
 
         // TR interpretation is ST-dependent
         if (st === 0xec) {
-            // Running: active cycle — cancel any pending Off fallback
-            this.cancelOffTimer()
             this.publishProperty('remaining_time', tr)
         } else if (st === 0xeb) {
             // DisplayOn: phA=0x05 → dryness level; otherwise → drying mode

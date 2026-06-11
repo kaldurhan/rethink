@@ -1,5 +1,7 @@
-import { describe, test } from 'node:test'
+import { describe, test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { rmSync, existsSync } from 'node:fs'
+import { storePath } from '@/cloud/devices/stage_store'
 import DUT from '@/cloud/devices/RHX7009TWS'
 import type { Metadata } from '@/cloud/thinq'
 import { MockHAConnection, MockThinq2Device, buf } from '@/tests/helpers/mocks'
@@ -95,6 +97,13 @@ function makeDevice() {
 }
 
 describe(MODEL_ID, () => {
+    // Wipe persisted stage between tests — all devices use the same DEVICE_ID
+    // ('test-id') so state written in one test leaks into the next via stage-state.json.
+    beforeEach(() => {
+        const p = storePath()
+        if (existsSync(p)) rmSync(p)
+    })
+
     test('device instantiates without throwing', () => {
         const { dev } = makeDevice()
         assert.ok(dev)
@@ -322,5 +331,17 @@ describe(MODEL_ID, () => {
         assert.equal(p.program, 'Quick Dry 30')
         assert.equal(p.remaining_time, 30)
         assert.equal(p.phase, 'Drying')
+    })
+
+    test('persisted active stage survives restart; End yields exactly one Done', () => {
+        const first = makeDevice()
+        first.thinq.emit('data', DRYING_TR29)
+        assert.equal(first.ha.devices[DEVICE_ID].properties.stage, 'Drying')
+
+        const second = makeDevice()
+        second.dev.start()
+        assert.equal(second.ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        second.thinq.emit('data', FINISHED)
+        assert.equal(second.ha.devices[DEVICE_ID].properties.stage, 'Done')
     })
 })
