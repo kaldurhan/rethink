@@ -52,6 +52,10 @@ const TEMPERATURES_VCDWL: Record<number, string> = {
 }
 
 // sub[3] — spin speed lookup.
+// Stages during which the course cannot legitimately change (panel locks
+// the dial once a cycle runs).
+const ACTIVE_WASHER_STAGES = new Set(['Washing', 'Rinsing', 'Spinning', 'Paused'])
+
 const SPINS_VCDWL: Record<number, number> = {
     0x06: 400,
     0x08: 800,
@@ -167,6 +171,7 @@ export default class Device extends AABBDevice {
     // Last unmapped course/phase codes already logged — packets repeat every few
     // seconds, so without this gate an unknown code floods the add-on log.
     private loggedUnknownCourse = -1
+    private loggedMispickCourse = -1
     private loggedUnknownPhase = -1
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
@@ -419,6 +424,29 @@ export default class Device extends AABBDevice {
         }
 
         if (!sub) return
+
+        // Guard B (2026-06-11 spec): the 114-byte packet variant can fake a
+        // block that passes Guard A (rem=256 observed live mid-Eco). A
+        // mid-cycle block claiming a different course than the one running
+        // is physically impossible — the panel locks the dial — so discard
+        // the whole sub-block; every sensor keeps its value.
+        const blkCourseLabel = COURSES_VCDWL[sub[4]] ?? 'unknown'
+        const runningCourse = this.getProperty('course')
+        if (
+            ACTIVE_WASHER_STAGES.has(this.stageFsm!.stage) &&
+            runningCourse !== undefined &&
+            blkCourseLabel !== runningCourse
+        ) {
+            if (sub[4] !== this.loggedMispickCourse) {
+                log(
+                    'status',
+                    this.id,
+                    `discarding mis-picked sub-block (course 0x${sub[4].toString(16).padStart(2, '0')} while running ${runningCourse})`,
+                )
+                this.loggedMispickCourse = sub[4]
+            }
+            return
+        }
 
         const phase = decodePhase(sub[1], sub[2])
         if (phase === 'unknown') {

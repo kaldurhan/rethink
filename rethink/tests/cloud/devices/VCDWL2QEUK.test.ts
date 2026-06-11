@@ -117,6 +117,27 @@ describe(MODEL_ID, () => {
         assert.notEqual(ha.devices[DEVICE_ID].properties.remaining_time, 2304)
     })
 
+    // Captured live 2026-06-11 11:51:12 mid-Eco — same 114-byte variant,
+    // but its fake block reads rem=256, which PASSES Guard A. Its course
+    // byte (0x04 Allergivård) differs from the running course (0x13 Eco
+    // 40-60); a mid-cycle course change is physically impossible (the
+    // panel locks the dial), so the block must be discarded entirely.
+    const MISPICK_114_ECO = buf(
+        'aaff200a00760023fe000100ec0064000000000913000000000000000005007c004800130e0c000100000107040100755a00000010010418000000000000040000000000000913000000000000000004007c004c00130e0c000100000107040100755a000000100104180000000000000400005cdfbb',
+    )
+
+    test('mid-cycle sub-block claiming a different course is discarded (Guard B)', () => {
+        const { ha, thinq } = makeDevice()
+        // Establish a running Eco 40-60 cycle (stage active).
+        thinq.emit('data', synthFrame(0x03, 0x0e, 0x09, 0x13, 0x67, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.course, 'Eco 40-60')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+        thinq.emit('data', MISPICK_114_ECO)
+        assert.equal(ha.devices[DEVICE_ID].properties.course, 'Eco 40-60')
+        // remaining_time must not pick up the bogus 256 either
+        assert.notEqual(ha.devices[DEVICE_ID].properties.remaining_time, 256)
+    })
+
     test('programme selection (ST=0xec, terminator 01,00) does NOT start the stage machine', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', SELECTION_BROWSE)
