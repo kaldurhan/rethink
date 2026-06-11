@@ -24,12 +24,16 @@ const COURSES_VCDWL = {
     0x88: 'Skötsel av mikroplaster',
     0x04: 'Allergivård',
 };
-// sub[13] — temperature lookup (only when phase Idle).
+// sub[1] (phA) — temperature index (programme-agnostic).
+// Confirmed by correlating cloud MQTT temp fields with binary phA values
+// across the Cotton temp-scroll (Cold→20→30→40→60→95→Cold).
 const TEMPERATURES_VCDWL = {
-    0x70: 'Cold',
-    0x7a: '20-30',
-    0x84: '40',
-    0x98: '60',
+    0x08: 'Cold',
+    0x01: '20',
+    0x02: '30',
+    0x03: '40',
+    0x05: '60',
+    0x06: '95',
 };
 // sub[3] — spin speed lookup.
 const SPINS_VCDWL = {
@@ -64,10 +68,13 @@ const PHASES_VCDWL = {
     // 0x_0e variants observed in programme-selection sub-blocks (machine idle, user browsing).
     // These share the low byte 0x0e with the operational rinse/spin phases above but are
     // distinct codes that only appear while the drum is not running.
+    // phA encodes the temperature index (same as TEMPERATURES_VCDWL keys).
     0x010e: 'Idle',
     0x020e: 'Idle',
     0x030e: 'Idle',
     0x050e: 'Idle',
+    // 0x0610: settled-display at TEMP_95 (phA=0x06, phB=0x10). Added 2026-06-11.
+    0x0610: 'Idle', // TEMP_95 settled
 };
 function decodePhase(phA, phB) {
     if (phA === 0x18 && phB >= 0x12 && phB <= 0x1f)
@@ -100,9 +107,9 @@ function findPowerBlock(inner) {
  *     03 PH_A PH_B SP CS 00 ... CS 0b
  *
  * Common layout (positions relative to sub-block start):
- *   [1]  PH_A   [2]  PH_B   [3] spin   [4] course
- *   [5]  0x00 (anchor)      [13] remaining_time_lo  [14] remaining_time_hi
- *   [15] initial_time_lo    [19] course (repeated — anchor)
+ *   [1]  PH_A (temperature index)   [2]  PH_B   [3] spin   [4] course
+ *   [5]  0x00 (anchor)              [13] remaining_time_lo  [14] remaining_time_hi
+ *   [15] initial_time_lo            [19] course (repeated — anchor)
  *
  * Long packets contain either two sub-blocks (steady-state) or one
  * device-info block followed by one status sub-block (boot-up). The STATUS
@@ -187,7 +194,7 @@ export default class Device extends AABBDevice {
                     name: 'Temperature',
                     icon: 'mdi:thermometer',
                     device_class: 'enum',
-                    options: ['Cold', '20-30', '40', '60', 'unknown'],
+                    options: ['Cold', '20', '30', '40', '60', '95', 'unknown'],
                 },
                 spin: {
                     platform: 'sensor',
@@ -371,7 +378,7 @@ export default class Device extends AABBDevice {
         // Only publish temp when it's a temp-scroll sub-block in Idle phase.
         const subMarker = inner[subStart];
         if (subMarker === 0x05 && sub[20] === 0x01 && phase === 'Idle') {
-            this.publishProperty('temp', TEMPERATURES_VCDWL[sub[13]] ?? 'unknown');
+            this.publishProperty('temp', TEMPERATURES_VCDWL[sub[1]] ?? 'unknown');
         }
         else if (st === 0xec) {
             const remaining = sub[13] | (sub[14] << 8);

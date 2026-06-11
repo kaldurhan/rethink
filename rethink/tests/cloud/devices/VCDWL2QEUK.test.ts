@@ -61,7 +61,7 @@ describe(MODEL_ID, () => {
         inner[17] = sp
         inner[18] = cs
         inner[19] = 0x00 // sub[5] = 0x00 (required by locator)
-        inner[27] = tt_lo // sub[13] — remaining_time low byte / temp byte
+        inner[27] = tt_lo // sub[13] — remaining_time low byte
         inner[28] = tt_hi // sub[14] — remaining_time high byte
         inner[33] = cs // sub[19] — CS repeat (required by locator)
         inner[34] = 0x01 // sub[20] — terminator (required by locator)
@@ -253,9 +253,9 @@ describe(MODEL_ID, () => {
             undefined,
         ],
         [
-            'at-20°C steady (phase Idle 0x0210, temp 20-30)',
+            'at-30°C steady (phase Idle 0x0210, temp 30)',
             'aaff200a007600020a000100ec006400050110062b00000000000000007a007a0000002b010000000000031a040101755a0000000200041800000000000004000000050210062b00000000000000007a007a0000002b010000000000031a040101755a00000002000418000000000000040000f987bb',
-            '20-30',
+            '30',
         ],
         [
             'to-40°C scroll (phase Idle, temp 40)',
@@ -275,6 +275,14 @@ describe(MODEL_ID, () => {
             assert.equal(ha.devices[DEVICE_ID].properties.temp, expectedTemp)
         })
     }
+
+    // TEMP_95: phA=0x06, phB=0x10 → phase 0x0610='Idle' (confirmed from Cotton temp-scroll
+    // capture 2026-06-11, where cloud TEMP_95 correlated with phA=0x06 in 0x03-variant sub-blocks).
+    test('temperature scroll: TEMP_95 settled (phA=0x06, phase Idle 0x0610)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x06, 0x10, 0x09, 0x2e, 0x8a, 0x00))
+        assert.equal(ha.devices[DEVICE_ID].properties.temp, '95')
+    })
 
     // Spin scroll captures. Expected values reflect the LAST sub-block.
     const SPIN_CASES: [string, string, number][] = [
