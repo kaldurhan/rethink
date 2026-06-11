@@ -170,11 +170,15 @@ export default class Device extends AABBDevice {
         if (st === 0xec && tr === 0)
             return;
         // Info-class packets (inner[8]=0x02) use a different byte layout — CS/TR/phase
-        // offsets are unreliable. ST=0x03 in an info-class packet means Paused (the
-        // firmware sends info-class bursts while the door is held open / cycle paused),
-        // not Cooldown. All other info-class ST values are suppressed.
+        // offsets are unreliable. Info-class ST=0x03 packets carry a sub-state
+        // code at inner[13], mirrored at inner[17] (same layout as the washer):
+        // 0x0c = panel pause, 0x07 = mid-cycle door-open pause, 0x10 = idle
+        // door event, 0x0e = idle panel event (live-captured 2026-06-11).
+        // Only the real pause codes may publish Paused; everything else is
+        // idle chatter and stays suppressed.
         if (isInfoClass) {
-            if (st === 0x03) {
+            const code = inner.length > 17 && inner[13] === inner[17] ? inner[13] : -1;
+            if (st === 0x03 && (code === 0x0c || code === 0x07)) {
                 this.publishProperty('run_state', 'Paused');
                 this.stageFsm.dispatch('paused');
             }

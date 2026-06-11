@@ -193,6 +193,25 @@ describe(MODEL_ID, () => {
         assert.equal(p.program, 'Quick Dry 30')
     })
 
+    // Captured live 2026-06-11 14:54 — door open/close and panel power on the
+    // IDLE dryer emit info-class ST=0x03 bursts with sub-state codes 0x10
+    // (door) and 0x0e (panel), mirrored at inner[13]/inner[17]. Only 0x0c
+    // (panel pause) and 0x07 (mid-cycle door-open) are real pauses.
+    const IDLE_DOOR_INFO = buf(
+        'aaff300a005100b74e0002010300161010030510000005e100000000000000000000000000010500255344485f58375f373030380000000000000000000102c2220b8b01070000000000000000006b72bb',
+    )
+    const IDLE_PANEL_INFO = buf(
+        'aaff300a005900b75300020103001e0e1003050e010d05e3000602000000460000000000000200000103000000010500255344485f58375f373030380000000000000000000102c2220b8b01070000000000000000006ea7bb',
+    )
+
+    test('idle door/panel info packets (codes 0x10/0x0e) are NOT a pause', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', IDLE_DOOR_INFO)
+        thinq.emit('data', IDLE_PANEL_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, undefined)
+    })
+
     test('programme selection (ST=0xec, ambiguous Startup tuple) does NOT start the stage machine', () => {
         // The dryer broadcasts ST=0xec with phase tuple 0x0100 (Startup) while
         // a programme is merely selected on the panel — the same tuple a real
