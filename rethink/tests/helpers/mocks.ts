@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events'
 import type { TestContext } from 'node:test'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { setFilter } from '@/util/logging'
 import type { Connection, DeviceDiscovery } from '@/cloud/homeassistant'
 import type { Metadata } from '@/cloud/thinq'
@@ -11,6 +14,7 @@ import assert from 'node:assert/strict'
 
 // Suppress device logging noise during tests. Imported for side effect.
 setFilter(() => false)
+if (!process.env.RETHINK_DATA_DIR) process.env.RETHINK_DATA_DIR = mkdtempSync(join(tmpdir(), 'rethink-test-'))
 
 // Re-enable device logging for tests that assert on log output; suppression
 // is restored after the test. Returns a console.log spy.
