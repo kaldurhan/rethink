@@ -477,7 +477,11 @@ export default class Device extends AABBDevice {
         const subMarker = inner[subStart]
         if (subMarker === 0x05 && sub[20] === 0x01 && DISPLAY_IDLE_VCDWL.has((sub[1] << 8) | sub[2])) {
             this.publishProperty('temp', TEMPERATURES_VCDWL[sub[1]] ?? 'unknown')
-        } else if (st === 0xec) {
+        } else if (st === 0xec && sub[20] !== 0x10 && sub[20] !== 0x00) {
+            // Post-cycle blocks (act 0x10/0x00) carry a leftover rem=1 and
+            // would blip remaining_time off the End-reset 0 (live 2026-06-12).
+            // Selection blocks (act 0x01) still publish — browsing shows the
+            // programme duration.
             const remaining = sub[13] | (sub[14] << 8)
             this.publishProperty('remaining_time', remaining)
         }

@@ -632,6 +632,9 @@ describe(MODEL_ID, () => {
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'End')
         assert.equal(p.cycle_phase, 'Finished')
+        // The tumble block carries rem=1 — it must not blip remaining_time
+        // off the End-reset 0 (live 2026-06-12 07:22:21, 0 → 1).
+        assert.equal(p.remaining_time, 0)
     })
 
     // Running packet where last sub-block has phase=0x100e (Finished), confirmed from
