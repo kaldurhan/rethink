@@ -19,7 +19,11 @@ A fork of [anszom/rethink](https://github.com/anszom/rethink) — a local protoc
 | LG F4X7511TWS washer       | `VCDWL2QEUK`   | `cloud/devices/VCDWL2QEUK.ts` | ✅ Complete |
 | LG RHX7009TWS tumble dryer | `SDH_X7_7008`  | `cloud/devices/RHX7009TWS.ts` | ✅ Complete |
 
-Suite: 294 tests, plain `npm test`, ~2 s.
+Suite: 302 tests, plain `npm test`, ~2 s.
+
+**Full reverse-engineered protocol spec** (framing, all code tables, phase
+namespaces, suppression rules, known traps — written for upstream/official
+integration developers): [`docs/protocol/`](protocol/README.md).
 
 ---
 
