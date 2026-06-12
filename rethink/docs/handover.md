@@ -1,6 +1,6 @@
 # Rethink Development Handover
 
-**Last updated:** 2026-06-12 (evening) · deployed version **1.0.68** · suite **317 tests, all green** (`npm test`, ~2.5 s)
+**Last updated:** 2026-06-12 (night) · deployed version **1.0.69** · suite **320 tests, all green** (`npm test`, ~2.5 s)
 
 ## What this project is
 
@@ -71,7 +71,7 @@ documented as the "duplicate-Done traps" in the dryer spec (§6) with the real
 packets as regression fixtures. 1.0.64 fixed the last cosmetic wart (post-cycle
 remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures dir.
 
-**Capture-day releases 1.0.65–1.0.68 (2026-06-12 afternoon/evening),** all
+**Capture-day releases 1.0.65–1.0.69 (2026-06-12 afternoon→night),** all
 live-validated except where noted:
 
 - **1.0.65** — corrected spin map (live: 1200 rpm shown correctly through a
@@ -94,8 +94,17 @@ live-validated except where noted:
   unknown-tuple policy (live: `unknown (3 1)` gone); new `initial_time`
   sensor (validates at next dryer cycle start). Both door sensors verified
   against physically-ajar doors.
+- **1.0.69** — washer `initial_time` (Programme duration entity, fills at
+  next cycle start); stage rinse/spin from activity codes (~85 s earlier,
+  0x53 heuristic deleted); explicit End-packet sub-block guard; dryer
+  status-class ST=0x03 end-equivalence pinned. Deployed and verified
+  (entity present, machines reconnected cleanly, Standby/Off/door-closed
+  all correct). "Pending release" markers in the gap list below are now
+  released.
 
 Operational notes from the day: after add-on **updates**, restart once more;
+verify the debug WS feeds (device AND cloud) are alive before relying on a
+capture — both go stale after restarts (the add-on log is the reliable tap);
 after repeated restarts the Wi-Fi modules can deep-sleep with dead TLS
 sessions — a door-open or panel touch forces the reconnect.
 
