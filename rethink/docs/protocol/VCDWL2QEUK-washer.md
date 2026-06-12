@@ -270,11 +270,18 @@ Info-class packets with a code at `inner[13]` mirrored at `inner[17]`:
 | `0x11` | idle panel browse                                                 | not a pause                                |
 | `0x1e` | pre-detect                                                        | not a pause                                |
 
-Only `0x0c` may publish Paused. ⚠ The dryer's equivalent codes turned out
-to be **shape-dependent** (meaning keyed on the sub-payload length at
-`inner[12]`); the washer codes above were mapped without that key and have
-not produced a false positive live, but a shape audit is prudent before an
-official implementation (see dryer page §5).
+Only `0x0c` may publish Paused. **Shape audit closed 2026-06-12**: a real
+mid-cycle door pause (pause press → door open/close → resume,
+cloud-correlated against `state: PAUSE` 12:08:40–12:09:10) delivered `0x0c`
+in shape `[12]=0x4d` (136-byte frame) — a _different_ shape than earlier
+pause sightings, confirming the code is pause across shapes, unlike the
+dryer where the code's meaning is shape-keyed (dryer page §5). Latency: the
+`0x0c` report fired ~23 s into the pause — detection is late, never false.
+Same incident: `remoteStart` auto-disarms on pause and re-arms on resume
+(cloud); `doorLock` releases ~3 s after PAUSE; the door events (§ above)
+captured the open/close exactly; and the rinse-start `0x0b` frames
+("detergent input") coincided with softener dispensing at the wash→rinse
+transition, supporting that label.
 
 ### 4.3 `0x53` motor-controller ramp
 

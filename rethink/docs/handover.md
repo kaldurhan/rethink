@@ -95,9 +95,9 @@ remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures di
 4. **No explicit End-packet sub-block guard.** Spec §6.4 says End packets carry
    no valid sub-block; the code relies on the locator failing rather than
    skipping decode when `st == 0x04` (the dryer enforces the equivalent rule).
-5. **Pause-code shape audit pending.** The washer's info-class pause codes were
-   mapped without the `inner[12]` shape key that proved essential on the dryer
-   (spec §4.2 flags this). No live false positive yet.
+5. ~~Pause-code shape audit~~ **CLOSED 2026-06-12**: a real door-pause delivered
+   0x0c in a new shape (`[12]=0x4d`) — pause code is shape-independent on the
+   washer, ~23 s latency, never false (spec §4.2).
 6. **`sub[15]` (initial/total time) unread** — combined with `0x8a` elapsed
    time this gives a % progress sensor. Pure code, no capture needed.
 7. **Activity labels `0x03`/`0x26`/`0x02`** (Detecting/Filling/pre-wash) are
