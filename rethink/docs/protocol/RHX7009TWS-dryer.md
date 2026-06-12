@@ -52,14 +52,35 @@ Process in this order:
 
 Unknown ST values (e.g. `0x4d` telemetry bursts) must be suppressed.
 
-### 2.2 TR byte semantics (context-dependent) [confirmed]
+### 2.2 TR byte semantics (context-dependent)
 
-| context                   | TR meaning                                                                                                                          |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| ST = `0xec` (running)     | minutes remaining                                                                                                                   |
-| ST = `0xeb`, phA = `0x05` | dryness level: `0x1e` Iron Dry, `0x41` Cupboard Dry, `0x46` Extra Dry                                                               |
-| ST = `0xeb`, phA ≠ `0x05` | drying mode: `0x46` Efficiency, `0x96` Turbo — ⚠ [best-guess: only synthetic test coverage; no real mode-browse capture exists yet] |
-| ST = `0x04` / `0xe2`      | not meaningful — force remaining-time to 0                                                                                          |
+| context                                      | TR meaning                                                                                    |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| ST = `0xec` (running)                        | minutes remaining [confirmed]                                                                 |
+| ST = `0xec`/`0xeb` (selection / idle browse) | **programme duration in minutes** (= cloud `initialTimeMinute`) [cloud-correlated 2026-06-12] |
+| ST = `0x04` / `0xe2`                         | not meaningful — force remaining-time to 0 [confirmed]                                        |
+
+⚠ **The old "dryness level / drying mode from TR" decode was wrong** — the
+same class of error as the washer spin map. `0x1e`/`0x41`/`0x46` are the
+**durations** 30/65/70 min of the three dryness settings, and `0x46`/`0x96`
+were the 70/150-min durations of mode variants; they merely co-varied with
+the settings under one user's habits. The real setting fields (2026-06-12
+panel scrolls, cloud-correlated against `dryLevel`/`ecoHybrid`):
+
+| offset      | field          | values                                        |
+| ----------- | -------------- | --------------------------------------------- |
+| `inner[14]` | dryness level  | `0x01` DAMPDRY · `0x03` IRON · `0x05` VERYDRY |
+| `inner[15]` | ecoHybrid mode | `0x02` NORMAL (Efficiency) · `0x03` TURBO     |
+
+Confirmed in 120-byte ST=`0xec` selection frames, where course also reads at
+`inner[18]` — i.e. selection frames expose these fields at _single-block_
+offsets even when double-block sized. In-cycle layout interaction with the
+phase tuple (which lives at the same single-block offsets) is **not yet
+pinned** — see §8. Consequence of TR-as-duration: captured at cycle start,
+it provides the total-time field for a % progress sensor. The `(05,03)`
+"Idle tuple" of §4.2 is actually _(dryness=VeryDry, mode=Turbo)_ — a
+settings pair, stable only because those were the user's habitual settings.
+TimeDry sub-scroll: cloud `timeDry` 30/40/50… with TR tracking 20–180 min.
 
 **Running with TR = 0** is the post-cycle anti-wrinkle tumble — but do not
 rely on this alone; one live tumble packet carried **TR = 1** and defeated a
@@ -169,6 +190,14 @@ pause set shape-gated, but no real mid-cycle door pause has been captured to
 confirm its actual code. An official implementation should capture one
 before relying on it.
 
+**Door state byte** [best-guess, 2026-06-12 idle door test]: the door event
+(`[12]=0x16`, code `[13]=0x10`, len 81) carries door state at `inner[31]` —
+`0x00` = open, `0x01` = closed. Alternated perfectly across four open/close
+pairs; an event counter increments at `inner[21]` (shared with other event
+types). Different offset than the washer's `[18]`, same event code. One more
+confirmation (e.g. the door-close before a cycle) would lift this to
+[confirmed] and enable a dryer door sensor.
+
 ## 6. The two duplicate-Done traps (both hit live)
 
 ### 6.1 Selection looks identical to a real start
@@ -211,12 +240,19 @@ standby     st=0b                   → Off
 ## 8. Open questions
 
 1. Real capture of a mid-cycle door-open pause (confirm/replace `0x07`).
-2. Real capture of drying-mode browsing (`ST=0xeb`, phA≠`0x05`) — current
-   Efficiency/Turbo fixtures are synthetic.
+2. ~~Real capture of drying-mode browsing~~ **RESOLVED 2026-06-12 with a
+   twist**: the mode (and dryness) never were in TR — see §2.2. The
+   `dryness_level`/`drying_mode` sensors need a rework to decode
+   `inner[14]`/`inner[15]` instead of duration lookups.
 3. Semantics of the large info-class shapes (`0x69`/`0x75`).
 4. Post-cycle tuple vocabulary (`(04,00)`, `(03,01)`, …) — intentionally
    unmapped; mapping them is unnecessary if the unknown-tuple rule is
    followed.
+5. How the `[14]/[15]` settings fields coexist with the phase tuple at the
+   same offsets during a running cycle — the §2.2 findings are from
+   selection frames; in-cycle frames need re-examination before reworking
+   the sensors.
+6. Confirm the door state byte `inner[31]` (§5) on a second occasion.
 
 ## 9. Suggested entity model
 

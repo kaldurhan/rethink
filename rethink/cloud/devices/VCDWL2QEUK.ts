@@ -380,6 +380,15 @@ export default class Device extends AABBDevice {
             return
         }
 
+        // Wake event ([13]=0x11) with cause 0x04 = woken by door open: the
+        // FIRST door open from sleep arrives as this event instead of a
+        // [13]=0x10 door event (asleep-door test, 2026-06-12). Without it the
+        // sensor misses every initial open after the panel times out.
+        if (inner.length >= 19 && inner[8] === 0x02 && inner[10] === 0x03 && inner[12] === 0x06 && inner[13] === 0x11) {
+            if (inner[18] === 0x04) this.publishProperty('door', 'open')
+            return
+        }
+
         // Info-class status packets (inner[8]=0x02, ST=0x03) carry a sub-state
         // code at inner[13], mirrored at inner[17]: 0x11 idle-browse, 0x1e
         // pre-detect, 0x01 detecting, 0x0b detergent input, 0x0c pause

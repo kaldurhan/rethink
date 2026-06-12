@@ -114,13 +114,23 @@ remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures di
    as packet type `0xb0`, 79×/cycle) is undecoded. See dryer spec §10.
 10. **`0x07` pause code unconfirmed** — shape-gated best-guess; needs a real
     mid-cycle door-open pause capture (open the dryer door once mid-cycle).
-11. **Drying-mode map (Efficiency/Turbo) only has synthetic fixtures** — needs a
-    real mode-browse capture (`ST=0xeb`, phA≠`0x05`).
+11. **`dryness_level` and `drying_mode` sensors decode the wrong bytes** —
+    the 2026-06-12 panel scrolls showed both were reading programme
+    _durations_ that co-varied with the settings (spin-map-class error). Real
+    fields: dryness at `inner[14]` (1=Damp, 3=Iron, 5=VeryDry), ecoHybrid at
+    `inner[15]` (2=Normal, 3=Turbo) — dryer spec §2.2. Rework needs the
+    in-cycle layout question answered first (spec §8.5: these offsets hold
+    the phase tuple while running).
 12. **`ST=0x03` (Cooldown) dispatches `ended`, not `coolPhase`**
     (`RHX7009TWS.ts:259`). Benign in all captures (only seen at end-of-cycle),
     but the intent is unpinned — a mid-cycle Cooldown-ST packet would latch Done
     early. Add a comment or test pinning why.
-13. **No total-time field** → no % progress for the dryer.
+13. **Total-time field found** (2026-06-12): TR during selection = programme
+    duration (= cloud `initialTimeMinute`), spec §2.2. Remaining work:
+    capture it at cycle start in the decoder → % progress sensor.
+    13b. **Dryer door sensor now possible**: door state at `inner[31]` of the
+    door event ([best-guess], spec §5) — needs one more confirmation, then
+    washer-parity `door` binary_sensor.
 
 ### Cross-cutting
 

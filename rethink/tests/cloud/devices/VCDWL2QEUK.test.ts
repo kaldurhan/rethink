@@ -775,6 +775,19 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.door, undefined)
     })
 
+    // Wake event captured live 2026-06-12 11:04:41 — opening the SLEEPING
+    // washer's door wakes it and emits [13]=0x11 with cause [18]=0x04
+    // (woken-by-door-open) instead of a [13]=0x10 door event.
+    const DOOR_WAKE_INFO = buf(
+        'aaff200a00410027cf000201030006110e0102110401050025564344574c325145554b000000000000000000000102c1220b8b01070000000000000000003338bb',
+    )
+
+    test('wake event ([13]=0x11, cause 0x04) publishes door=open (first open from sleep)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DOOR_WAKE_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'open')
+    })
+
     test('door event does not affect run_state or the stage machine', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_RUNNING_1MIN)

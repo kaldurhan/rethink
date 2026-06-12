@@ -241,13 +241,15 @@ event when the door was closed before the morning's cycle, and the cloud's
 `doorLock: ON` arriving seconds after the final close (remote-start arming
 locks the door). These frames fire **only** on actual door motion — zero
 occurrences mid-cycle in any capture. The frame also carries the model
-string (`VCDWL2QEUK`). A `[13]=0x11` variant with `[18]=0x04` exists
-(observed once, programme-scroll evening) — different event, semantics
-unknown; the `[13]=0x10` check excludes it.
+string (`VCDWL2QEUK`).
 
-Door events while the machine is fully asleep (panel dark, no session) have
-not been observed — the keepalive state byte flip (`e8`→`e9`) at session
-start is a possible but unconfirmed door/session signal.
+**Wake event `[13]=0x11`** [confirmed, asleep-door test 2026-06-12]: opening
+the door of a _sleeping_ machine wakes it (keepalive flips `e8`→`e9`,
+DisplayOn follows) and emits `[13]=0x11` with the wake cause at `[18]` —
+`0x04` = woken by door open. The first open-from-sleep arrives **only** as
+this event (no `[13]=0x10` fires for it), so a door decoder must also map
+`(0x11, cause 0x04)` → open. Subsequent motion uses normal `[13]=0x10`
+events. Other wake causes (power button does **not** emit `0x11`) unknown.
 
 #### Pause codes
 
@@ -344,10 +346,12 @@ with a real course byte and garbage elsewhere. Two live incidents:
    `0x27` is a transient drain value, not a setting.
 4. If a cycle ends while paused, pause-duration accounting upstream of the
    protocol (HA automation layer here) may need to close the open pause.
-5. The `[13]=0x11 / [18]=0x04` info-event variant (§4.2) — semantics
-   unknown, observed once.
-6. Door behaviour while fully asleep (no session) unobserved — unknown
-   whether motion is reported at all before the panel wakes.
+5. ~~The `[13]=0x11 / [18]=0x04` variant~~ **RESOLVED 2026-06-12**: wake
+   event, cause `0x04` = door-open (§4.2). Other wake causes unmapped.
+6. ~~Door behaviour while asleep~~ **RESOLVED 2026-06-12**: door motion
+   wakes the machine; the first open arrives as the `0x11` wake event,
+   the rest as normal `0x10` door events. Full coverage. The keepalive
+   state byte (`e8` asleep / `e9` session) is a session bit, not door.
 
 ## 9. Suggested entity model
 
