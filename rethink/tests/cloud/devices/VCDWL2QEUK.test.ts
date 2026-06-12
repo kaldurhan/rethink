@@ -567,6 +567,14 @@ describe(MODEL_ID, () => {
         })
     }
 
+    test('inter-rinse spin activity (0x27) publishes cycle_phase=Rinsing (panel parity)', () => {
+        const { ha, thinq } = makeDevice()
+        // Live 2026-06-12 12:57: act walked 0c → 27 → 0c between rinse spans
+        // while the panel showed "Sköljning" throughout.
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x13, 0x00, [0x27, 0x0c]))
+        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, 'Rinsing')
+    })
+
     test('frame not matching AA..BB envelope is ignored', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', buf('001122'))

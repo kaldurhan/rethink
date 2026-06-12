@@ -163,17 +163,18 @@ alternation) → 0x0c (rinse) → 0x0e (drain + final spin) → 0x10 (finished)
 → 0x00 (post-cycle idle)
 ```
 
-| code   | phase                                    | confidence                                                                                   |
-| ------ | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `0x01` | Idle (programme selected / temp scroll)  | [confirmed] — this is also the "selection terminator": selection blocks always end `(01,00)` |
-| `0x03` | Detecting (load weighing)                | [best-guess] — observed at cycle start once; did **not** appear at a Turbowash 39 start      |
-| `0x26` | Filling                                  | [best-guess] — recurs during wash as `26↔0b` alternation, consistent with refill bursts      |
-| `0x02` | Washing (pre-tumble)                     | [best-guess]                                                                                 |
-| `0x0b` | Washing (main tumble)                    | [confirmed]                                                                                  |
-| `0x0c` | Rinsing                                  | [confirmed] — span lengths match rinse windows in two different programmes                   |
-| `0x0e` | Spinning (covers drain + final spin)     | [confirmed]                                                                                  |
-| `0x10` | Finished (post-cycle anti-crease tumble) | [confirmed]                                                                                  |
-| `0x00` | Post-cycle idle                          | [confirmed]                                                                                  |
+| code   | phase                                    | confidence                                                                                                                                                         |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0x01` | Idle (programme selected / temp scroll)  | [confirmed] — this is also the "selection terminator": selection blocks always end `(01,00)`                                                                       |
+| `0x03` | Detecting (load weighing)                | [best-guess] — observed at cycle start once; did **not** appear at a Turbowash 39 start                                                                            |
+| `0x26` | Filling                                  | [best-guess] — recurs during wash as `26↔0b` alternation, consistent with refill bursts                                                                            |
+| `0x02` | Washing (pre-tumble)                     | [best-guess]                                                                                                                                                       |
+| `0x0b` | Washing (main tumble)                    | [confirmed]                                                                                                                                                        |
+| `0x0c` | Rinsing                                  | [confirmed] — span lengths match rinse windows in two different programmes                                                                                         |
+| `0x27` | Inter-rinse drain+spin                   | [confirmed live 2026-06-12] — ~2-min spans between rinse spans; the panel shows "Sköljning" through these, so label it Rinsing for panel parity                    |
+| `0x0e` | Spinning (covers drain + final spin)     | [confirmed] — note: fires at final-drain start, ~1–2 min before the panel switches from "Sköljning" to "Centrifugering" (the panel counts the last drain as rinse) |
+| `0x10` | Finished (post-cycle anti-crease tumble) | [confirmed]                                                                                                                                                        |
+| `0x00` | Post-cycle idle                          | [confirmed]                                                                                                                                                        |
 
 Unknown codes: keep the last published phase and log once — do not publish
 a raw value into an enum.

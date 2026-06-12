@@ -102,6 +102,10 @@ const ACTIVITY_VCDWL: Record<number, string> = {
     0x02: 'Washing',
     0x0b: 'Washing',
     0x0c: 'Rinsing',
+    // 0x27 = inter-rinse drain+spin (~2 min between rinse spans, live
+    // 2026-06-12). Labelled Rinsing to match the panel, which shows
+    // "Sköljning" through intermediate spins; 0x0e is the final spin.
+    0x27: 'Rinsing',
     0x0e: 'Spinning',
     0x10: 'Finished',
 }
