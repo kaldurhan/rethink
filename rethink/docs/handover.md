@@ -129,15 +129,15 @@ sessions — a door-open or panel touch forces the reconnect.
 7. **Activity labels `0x03`/`0x26`/`0x02`** (Detecting/Filling/pre-wash) are
    best-guess — confirm on a programme with a weigh step (Bomull/Eco).
    'Detecting' did **not** appear at a Turbowash 39 start.
-8. **Undecoded packet types** `0x67`, `0x88`, `0x8e`, `0x9e`, `0x80`, `0xa0`,
-   `0x16` — inventory with known constants in washer spec §10. Most promising:
-   `0x67` (per-minute sampler — correlate against cloud `remainTimeMinute`).
+8. **Undecoded packet types** `0x88`, `0x8e`, `0x9e`, `0x80`, `0xa0`, `0x16` —
+   inventory in washer spec §10. `0x67` partially decoded 2026-06-12 (rinse
+   telemetry, [24]=rinse-elapsed min; NOT a remaining-time source).
 
 ### Dryer
 
-9. **No energy sensor.** The washer publishes `course_spend_power`; the dryer's
-   equivalent data (info-class shape `0x75`, len 172 — historically catalogued
-   as packet type `0xb0`, 79×/cycle) is undecoded. See dryer spec §10.
+9. **No dryer energy sensor — analysis 2026-06-12 came back negative**: the
+   len-176 frames carry 2 Hz counters, not Wh (dryer spec §10); a conclusive
+   decode needs a dry cycle with a verified-live cloud feed for periodicEnergyData correlation.
 10. ~~`0x07` pause code~~ **CLOSED 2026-06-12**: real door pause emits 0x0c
     (same as panel pause); 0x07 dropped. Dryer door sensor implemented (gap 13b).
 11. ~~dryness_level/drying_mode decode wrong bytes~~ **REWORKED 2026-06-12**

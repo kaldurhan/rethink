@@ -300,6 +300,15 @@ classifies by `inner[8]`/length (§1), not by `inner[3]`:
 probably the same packets as the `0x75` info-class shape (len 172) in §5
 [best-guess, unverified]. The cloud's `periodicEnergyData` reports Wh per
 15-min interval; decoding `0xb0` against it would enable a local
-`course_spend_power` sensor like the washer's. No total-cycle-time field has
-been identified either (`sub2+10` is remaining only) — that blocks a %
-progress sensor.
+`course_spend_power` sensor like the washer's.
+
+**Negative result 2026-06-12** (full Mixed Fabrics cycle, meter
+ground-truth ≈500 Wh): no u8/u16 field in these frames tracks accumulated
+energy. The high-correlation candidates at `inner[41..46]` are
+**counters ticking ~2/second** (steps quantized at 2–3×257; they ticked at a
+constant rate through the heat-up ramp where real energy accumulated
+slower). One open candidate: `inner[112]` climbed 33→53 over the cycle —
+temperature-shaped, unverified. A conclusive decode needs a cycle with a
+**verified-live cloud feed** for `periodicEnergyData` correlation — the
+debug cloud WS had gone stale for this capture (it dies on add-on restarts
+like the device WS; check liveness mid-capture).
