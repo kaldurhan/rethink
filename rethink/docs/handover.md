@@ -1,6 +1,6 @@
 # Rethink Development Handover
 
-**Last updated:** 2026-06-12 (night) · deployed version **1.0.69** · suite **320 tests, all green** (`npm test`, ~2.5 s)
+**Last updated:** 2026-06-13 · released version **1.0.72** · suite **329 tests, all green** (`npm test`, ~2.5 s)
 
 ## What this project is
 
@@ -102,7 +102,7 @@ live-validated except where noted:
   all correct). "Pending release" markers in the gap list below are now
   released.
 
-**1.0.70/1.0.71 — integration hardening (2026-06-13):**
+**1.0.70–1.0.72 — integration hardening (2026-06-13):**
 
 - **Frame-silence availability watchdog**: no frames for 150 s → device
   marked unavailable in HA (half-open TLS sessions deliver no 'close';
@@ -120,6 +120,13 @@ live-validated except where noted:
 - **Native `progress` sensor (1.0.71)** on both machines: % from
   initial_time vs remaining_time, holds through Paused, pins 100 at Done
   and 0 at Off — no HA templates needed.
+- **Capture retention (1.0.72)**: capture ndjson older than 14 days is
+  deleted at startup, so `capture_raw` can stay on permanently. The ad-hoc
+  capture scripts in `~/rethink-captures/` are superseded by this option
+  (keep the directory for its historical captures + monitor tooling).
+- **Live validation pending** for the 1.0.70–72 features: progress/summary
+  sensors validate at the next wash+dry; the availability watchdog at the
+  next connection drop. All fixture-tested.
 - **HA side** (`ha-automations/laundry_extras.yaml`): mold-prevention
   reminder — washed but door closed 2 h after Done → notify; import as
   automation.
