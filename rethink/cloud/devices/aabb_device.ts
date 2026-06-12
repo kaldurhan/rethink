@@ -76,6 +76,9 @@ export default abstract class AABBDevice extends HADevice {
             if (ACTIVE_STAGES.has(stage) && this.cycleStartedAt === null) {
                 this.cycleStartedAt = Date.now()
             }
+            if (stage === 'Done') this.publishProperty('progress', 100)
+            else if (stage === 'Off') this.publishProperty('progress', 0)
+            else this.updateProgress()
             if (stage === 'Done') {
                 // End-of-cycle summary: duration from the cycle-start edge,
                 // energy from the device's own cycle counter when it has one.
@@ -154,6 +157,19 @@ export default abstract class AABBDevice extends HADevice {
 
         this.publishCache[prop] = value
         this.HA.publishProperty(this.id, prop, value)
+        if (prop === 'remaining_time' || prop === 'initial_time') this.updateProgress()
+    }
+
+    // Native % progress from initial_time vs remaining_time while a cycle is
+    // underway (Paused included — progress holds rather than resets). Done
+    // pins 100, Off pins 0 (see initStageFSM).
+    private updateProgress() {
+        const stage = this.stageFsm?.stage
+        if (!stage || (!ACTIVE_STAGES.has(stage) && stage !== 'Paused')) return
+        const total = this.publishCache['initial_time']
+        const left = this.publishCache['remaining_time']
+        if (typeof total !== 'number' || typeof left !== 'number' || total <= 0) return
+        this.publishProperty('progress', Math.max(0, Math.min(100, Math.round((100 * (total - left)) / total))))
     }
 
     getProperty(prop: string): string | number | undefined {

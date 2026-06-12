@@ -162,6 +162,15 @@ export default class Device extends AABBDevice {
                     payload_on: 'open',
                     payload_off: 'closed',
                 },
+                progress: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-progress',
+                    state_topic: '$this/progress',
+                    name: 'Progress',
+                    icon: 'mdi:progress-helper',
+                    unit_of_measurement: '%',
+                    state_class: 'measurement',
+                },
                 last_cycle_duration: {
                     platform: 'sensor',
                     unique_id: '$deviceid-last-cycle-duration',

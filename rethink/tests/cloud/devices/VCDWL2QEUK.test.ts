@@ -766,6 +766,18 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.initial_time, 107)
     })
 
+    test('native progress: 0 at start, tracks remaining, 100 at Done, 0 at Off', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x6b, 0x00, [0x0b, 0x01]))
+        assert.equal(ha.devices[DEVICE_ID].properties.progress, 0, 'cycle start: remaining == duration')
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x36, 0x00, [0x0c, 0x0b])) // remaining 54
+        assert.equal(ha.devices[DEVICE_ID].properties.progress, 50, '(107-54)/107 rounds to 50%')
+        thinq.emit('data', END_OF_CYCLE)
+        assert.equal(ha.devices[DEVICE_ID].properties.progress, 100, 'Done pins 100')
+        for (let i = 0; i < 10; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.progress, 0, 'Off pins 0')
+    })
+
     test('End packets never decode a sub-block even if one looks valid (spec §6.4)', () => {
         const { ha, thinq } = makeDevice()
         // Synthetic End frame carrying a plausible sub-block with a different course.

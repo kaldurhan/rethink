@@ -102,7 +102,7 @@ live-validated except where noted:
   all correct). "Pending release" markers in the gap list below are now
   released.
 
-**1.0.70 — integration hardening (2026-06-13):**
+**1.0.70/1.0.71 — integration hardening (2026-06-13):**
 
 - **Frame-silence availability watchdog**: no frames for 150 s → device
   marked unavailable in HA (half-open TLS sessions deliver no 'close';
@@ -117,10 +117,12 @@ live-validated except where noted:
 - **Diagnostics**: `last_unknown` sensor per machine surfaces unknown
   activity/course/spin/phase codes into HA history (was log-only); washer
   water-temp series `[32..35]` published as diagnostic sensors.
-- **HA side** (`ha-automations/`): `laundry_progress_package.yaml`
-  (% progress template sensors → configuration/packages) and
-  `laundry_extras.yaml` (mold-prevention reminder: washed but door closed
-  2 h after Done → notify; import as automation).
+- **Native `progress` sensor (1.0.71)** on both machines: % from
+  initial_time vs remaining_time, holds through Paused, pins 100 at Done
+  and 0 at Off — no HA templates needed.
+- **HA side** (`ha-automations/laundry_extras.yaml`): mold-prevention
+  reminder — washed but door closed 2 h after Done → notify; import as
+  automation.
 
 Operational notes from the day: after add-on **updates**, restart once more;
 verify the debug WS feeds (device AND cloud) are alive before relying on a

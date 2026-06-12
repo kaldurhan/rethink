@@ -306,6 +306,15 @@ export default class Device extends AABBDevice {
                     device_class: 'enum',
                     options: ['Off', 'Paused', 'Washing', 'Rinsing', 'Spinning', 'Done'],
                 },
+                progress: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-progress',
+                    state_topic: '$this/progress',
+                    name: 'Progress',
+                    icon: 'mdi:progress-helper',
+                    unit_of_measurement: '%',
+                    state_class: 'measurement',
+                },
                 last_cycle_duration: {
                     platform: 'sensor',
                     unique_id: '$deviceid-last_cycle_duration',
