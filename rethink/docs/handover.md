@@ -128,9 +128,21 @@ Eco replay pins both walks (stage + phase). Full-cycle raw capture:
   reading 0x07 collided with the pause code set. Fixed in 1.0.61: pause
   codes are gated on the user-event packet shape (`inner[12]=0x16`); see
   selection-gating rule 3 above.
-- ⏳ Re-validate one full wash+dry on 1.0.61 (expect clean exactly-once on
-  the dryer, no Paused blips). Re-arm
-  `/home/zorgin/rethink-captures/monitor-validation-cycle.mjs` for the run.
+- ✅ **Re-validation PASSED on 1.0.63** (2026-06-12 06:32–07:22, Turbowash 39
+    - Quick Dry 30, monitored live): exactly one Done edge per machine, one
+      notification each, watchdog silent. Dryer: the 1.0.59 failure sequence
+      replayed byte-for-byte (AntiCrease → unknown `(4 0)` tumble → End) with no
+      duplicate Done and no Paused blip; program kept "Quick Dry 30" at End.
+      Washer: cycle_phase walked Washing→Filling↔Washing→Rinsing→Spinning→
+      Finished; remaining_time live through the entire final spin (9→…→0 — was
+      frozen at 3 on the old decoder); no course flicker. Activity code 0x0e
+      flagged Spinning 85 s before the 0x53 stage heuristic — candidate for a
+      future stage-event simplification. Note: 'Detecting' (0x03) did not appear
+      at Turbowash start — label still unconfirmed. One cosmetic wart found and
+      fixed in 1.0.64: post-cycle tumble block (act 0x10, rem=1) blipped
+      remaining_time 0→1 after End; passive post-cycle blocks no longer publish
+      remaining_time. Monitor tooling re-runnable:
+      `/home/zorgin/rethink-captures/monitor-validation-cycle.mjs`.
 
 ### Open follow-ups
 
