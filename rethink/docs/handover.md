@@ -81,10 +81,14 @@ live-validated except where noted:
   (inter-rinse spin) → Rinsing; dryer door sensor; dryer pause set fixed to
   `0x0c` only.
 - **1.0.67** — keepalive session bit (`0xe8` asleep / `0xe9` active) corrects
-  stale post-cycle run_state. ⚠ **Live flip validation still pending** at
-  session end: both machines had been left with doors ajar and the washer
-  hadn't returned to `e8` sleep yet — verify `run_state` reads Standby on
-  both machines next session (HA showed stale `AntiCrease` on the washer).
+  stale post-cycle run_state. **VALIDATED live** (late evening): the washer
+  was woken once more, fell asleep, and streamed `e8` keepalives with the
+  connection held — every earlier "no flip" was the module's TLS session
+  dying (a restart-day artifact), never the signal being absent. The stale
+  `AntiCrease` itself cleared at wake via a real Standby frame; final state
+  Standby / stage Off / door closed, all correct. Note for diagnostics: the
+  add-on log (`clip/message/devices/<did>`) is the reliable live tap —
+  the `:44401/device` debug WS can go stale after restarts.
 - **1.0.68** — dryer dryness/mode from real setting fields `[14]/[15]`
   (live: Very Dry / Turbo shown correctly, `unknown (0x0)` gone); phase
   unknown-tuple policy (live: `unknown (3 1)` gone); new `initial_time`
