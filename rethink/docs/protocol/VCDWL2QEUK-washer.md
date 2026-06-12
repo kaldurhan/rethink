@@ -394,6 +394,23 @@ here so future decoding starts from the known constants instead of zero.
 | `0xa0`     | `0x03` | —         | Appears once at end-of-cycle, just after End. Purpose unknown.                                                                                                                                                                          |
 | `0x16`     | `0x4d` | 18        | Once per session after `TCLCount=2`. Purpose unknown. Low value.                                                                                                                                                                        |
 
+**11-byte periodic-energy frame** [cloud-correlated 2026-06-12, two events]:
+`aa 0b 20 3e <per_hi> <per_lo> <acc_hi> <acc_lo> <seq> <chk> bb` — fires at
+each ~15-min energy interval, mirroring the cloud's `periodicEnergyData`
+exactly. `inner[1]=0x3e` marker; interval Wh at `inner[2..3]` **BE**;
+accumulated Wh at `inner[4..5]` **BE**; `sequenceNum` at `inner[6]`.
+Largely redundant with the `10 08` block (§2.3) but proves interval data
+exists locally.
+
+**8-byte event frames** (`aa 08 20 …`) [unmapped]: rare one-off events with
+a 3-byte payload. One fired 1 s before the cloud reported
+`ezDispenseDrawerState: OPEN` (drawer opened mid-cycle, 2026-06-12) — a
+drawer-event candidate, but the only two samples have dissimilar payloads.
+Related cloud-only observations from that incident: drawer close and the
+`ezDetergentState: EZCSDT_EMPTY` warning produced **no** identified binary
+frames, and the cloud `error` field stayed `ERROR_NO` — a mid-cycle drawer
+pull is a warning, not an error state.
+
 `0x8a` extras beyond the three published fields (§4.1): `inner[31..35]` is a
 run of five temperature sensor points (36–49 °C during rinse; only `[31]` is
 published); `inner[20]` and `inner[30]` are internal counters [confirmed but
