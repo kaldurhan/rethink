@@ -51,18 +51,24 @@ const TEMPERATURES_VCDWL: Record<number, string> = {
     0x06: '95',
 }
 
-// sub[3] — spin speed lookup.
 // Stages during which the course cannot legitimately change (panel locks
 // the dial once a cycle runs).
 const ACTIVE_WASHER_STAGES = new Set(['Washing', 'Rinsing', 'Spinning', 'Paused'])
 
+// sub[3] — spin-speed code. All six wheel positions cloud-correlated live
+// during the 2026-06-12 spin-button scroll (capture: cycle-2026-06-12-*):
+// two full wheel revolutions, binary↔cloud transitions paired 1:1 plus
+// course-default cross-checks. The previous map was shifted two wheel
+// positions (it read 0x06 as 400; the true value is 1000). 0x27 (transient
+// during drain) is NOT a panel setting and stays unmapped — unknown codes
+// keep the last published value.
 const SPINS_VCDWL: Record<number, number> = {
-    0x06: 400,
-    0x08: 800,
-    0x09: 1000,
-    0x0c: 1200,
-    0x01: 1400,
-    0x27: 0, // seen in Blandmaterial final spin; actual RPM unconfirmed
+    0x01: 400,
+    0x04: 800,
+    0x06: 1000,
+    0x08: 1200,
+    0x09: 1400,
+    0x0c: 0, // "drain only" wheel position (SPIN_DRAIN_ONLY)
 }
 
 // (sub[1] << 8) | sub[2] — display tuple. Only used to gate temperature
@@ -183,6 +189,7 @@ export default class Device extends AABBDevice {
     private loggedUnknownCourse = -1
     private loggedMispickCourse = -1
     private loggedUnknownActivity = -1
+    private loggedUnknownSpin = -1
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
@@ -313,22 +320,19 @@ export default class Device extends AABBDevice {
     processAABB(inner: Buffer) {
         if (inner.length < 11 || inner[0] !== 0x20) return
 
-        // Intercept typed packets before the state-table check.
-        // Door: 0x63 = open, 0x4c = close (ST=0x03, not in STATES_VCDWL).
-        // 0x8a: periodic snapshot (ST=0x02, not in STATES_VCDWL) — fires ~every 5 min.
+        // inner[3] is the FRAME-LENGTH byte (total frame size & 0xff), not a
+        // packet type — verified over 9.6k frames across all captures
+        // (2026-06-12). The two intercepts below key on it because those
+        // lengths are unique in practice; real packet identity lives in the
+        // info-class shape constants at inner[12..13].
+        //
+        // 138-byte frame (0x8a): periodic snapshot (ST=0x02, not in
+        // STATES_VCDWL) — fires ~every 5 min.
         //   inner[23] = elapsed minutes since door-lock (±2 min).
         //   inner[25] = remaining minutes in current phase (wash or rinse).
         //   inner[31] = water/drum temperature (°C), confirmed from Blandmaterial capture.
-        const packetType = inner[3]
-        if (packetType === 0x63) {
-            this.publishProperty('door', 'open')
-            return
-        }
-        if (packetType === 0x4c) {
-            this.publishProperty('door', 'closed')
-            return
-        }
-        if (packetType === 0x8a) {
+        const frameLen = inner[3]
+        if (frameLen === 0x8a) {
             if (inner.length >= 32) {
                 this.publishProperty('elapsed_time', inner[23])
                 this.publishProperty('phase_remaining_time', inner[25])
@@ -336,14 +340,15 @@ export default class Device extends AABBDevice {
             }
             return
         }
-        // 0x53: motor-controller ramp packet. inner[12]=0x18 (motor active),
-        // inner[13]=speed step 0x12..0x1f. Fires concurrently with 0x76 during
-        // tumble AND exclusively during the final drain+spin (0x76 absent for 15+
-        // min). The >90 s tumble-silence gate distinguishes the final spin
-        // (stage spinPhase) from intermediate ramps (first one = rinse began).
-        // cycle_phase itself is published from the activity codes in the 0x76
-        // path — this packet only drives stage events.
-        if (packetType === 0x53) {
+        // 83-byte frame (0x53): motor-controller ramp. inner[12]=0x18 (motor
+        // active), inner[13]=speed step 0x12..0x1f. Fires concurrently with
+        // status packets during tumble AND exclusively during the final
+        // drain+spin (status tumble absent for 15+ min). The >90 s
+        // tumble-silence gate distinguishes the final spin (stage spinPhase)
+        // from intermediate ramps (first one = rinse began). cycle_phase
+        // itself is published from the activity codes in the status path —
+        // this packet only drives stage events.
+        if (frameLen === 0x53) {
             const isActiveSpin = inner.length >= 14 && inner[12] === 0x18 && inner[13] >= 0x12 && inner[13] <= 0x1f
             if (isActiveSpin) {
                 const isFinalSpin = Date.now() - this.lastTumbleTime > 90000
@@ -358,6 +363,20 @@ export default class Device extends AABBDevice {
                     }
                 }
             }
+            return
+        }
+
+        // Door events arrive as 65-byte info-class frames: shape
+        // inner[12]=0x06, event code inner[13]=0x10 (the same code the dryer
+        // uses for its door event), door state at inner[18]: 0x01=open,
+        // 0x02=closed. Cloud-correlated 2026-06-12 — seven alternating
+        // open/close events plus the doorLock follow-up after remote-start
+        // arming. The former decode keyed on inner[3]=0x63/0x4c, i.e. on
+        // 99/76-byte frame LENGTHS, and read "open" from unrelated telemetry
+        // through entire cycles.
+        if (inner.length >= 19 && inner[8] === 0x02 && inner[10] === 0x03 && inner[12] === 0x06 && inner[13] === 0x10) {
+            if (inner[18] === 0x01) this.publishProperty('door', 'open')
+            else if (inner[18] === 0x02) this.publishProperty('door', 'closed')
             return
         }
 
@@ -458,8 +477,16 @@ export default class Device extends AABBDevice {
         // packets NOT resetting it.
         if (TUMBLE_ACTIVITY.has(sub[20])) this.lastTumbleTime = Date.now()
 
+        // Unknown spin bytes (e.g. transient 0x27 during drain) keep the last
+        // published value — they are not wheel settings.
         const sp = sub[3]
-        this.publishProperty('spin', SPINS_VCDWL[sp] ?? 0)
+        const spinRpm = SPINS_VCDWL[sp]
+        if (spinRpm !== undefined) {
+            this.publishProperty('spin', spinRpm)
+        } else if (sp !== this.loggedUnknownSpin) {
+            log('status', this.id, `unknown spin byte 0x${sp.toString(16).padStart(2, '0')}`)
+            this.loggedUnknownSpin = sp
+        }
 
         const cs = sub[4]
         const courseLabel = COURSES_VCDWL[cs]

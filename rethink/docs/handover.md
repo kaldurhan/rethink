@@ -75,16 +75,17 @@ remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures di
 
 ### Washer
 
-1. **Door sensor is known-bad but still shipped.** Spec §8.1: a 0x63-byte-_long_
-   info packet collides with the `inner[3]=0x63` door-open intercept — the
-   sensor reads "open" through entire cycles. Real door events are suspected to
-   be the short `aa 08 20 …` frames (currently discarded as <11 bytes). Needs an
-   idle washer door open/close capture, then a shape/length guard or a
-   short-frame decode. _Highest-priority correctness gap._
-2. **Spin codes `0x04` and `0x27` unmapped** — and the `?? 0` fallback publishes
-   them as **0 rpm** (Sportkläder / Hand-Ull default is `0x04`). A 2-minute
-   spin-button scroll with the cloud feed running closes both (same method as
-   the course validation; the 2026-06-12 morning attempt recorded nothing — redo).
+1. ~~Door sensor known-bad~~ **RESOLVED 2026-06-12** (pending release): the
+   idle door test revealed `inner[3]` is the **frame-length byte**, not a
+   packet type (spec §1) — the old `0x63`/`0x4c` "door events" were 99/76-byte
+   telemetry. Real door events: 65-byte info-class frames, `[12]=0x06,
+[13]=0x10`, state at `[18]` (spec §4.2). Decoder re-keyed; regression
+   fixtures from the live capture.
+2. ~~Spin codes unmapped~~ **RESOLVED 2026-06-12** (pending release): full
+   wheel cloud-correlated via spin scroll — the entire previous map was
+   shifted two positions (`0x06`=1000, not 400; `0x0c`=drain-only, not 1200).
+   Spec §3.4 corrected; unknown codes now keep the last value instead of
+   publishing 0.
 3. **Stage events still come from the `0x53` heuristic** (ramp + 90 s
    tumble-silence gate) while `cycle_phase` already derives Rinsing/Spinning
    from activity codes `0x0c`/`0x0e`, which fire **~85 s earlier** (spec §4.3).

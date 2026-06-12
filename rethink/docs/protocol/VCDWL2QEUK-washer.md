@@ -6,18 +6,32 @@ All offsets are inside `inner` (envelope stripped). Washer frames have
 
 ---
 
-## 1. Packet types (`inner[3]`)
+## 1. There is no packet-type byte — `inner[3]` is the frame length
 
-Dispatch on `inner[3]` **before** looking at the machine state — several
-packet types carry machine-state bytes that are not in the state table.
+**`inner[3]` is the total frame length (`& 0xff`), not a packet type.**
+Verified over 9,600+ frames across every capture on both machines with zero
+exceptions (2026-06-12): short frames carry the length at `buf[1]`; `0xff`
+there is an escape meaning "length at `buf[5]`" (= `inner[3]`). Every
+historical "packet type" matches its frame size exactly — `0x13` = 19-byte
+standby, `0x44` = 68-byte DisplayOn, `0x76` = 118-byte running status,
+`0x8a` = 138-byte snapshot, `0x53` = 83-byte motor ramp, `0x67` = 103,
+`0x9e` = 158…
 
-| `inner[3]` | Meaning                          | Notes                                                    |
-| ---------- | -------------------------------- | -------------------------------------------------------- |
-| `0x63`     | Door **open** event              | [confirmed] but see §8.1 — a length-collision bug exists |
-| `0x4c`     | Door **close** event             | [confirmed]                                              |
-| `0x8a`     | Periodic snapshot (~every 5 min) | machine-state byte is `0x02`; see §5                     |
-| `0x53`     | Motor-controller ramp            | machine-state byte is `0x03`; see §4.3                   |
-| other      | Status packet                    | decode per §2–§4                                         |
+Real packet identity lives in **content**: the machine-state byte
+(`inner[10]`), the info-class marker (`inner[8] = 0x02`), and the shape
+constants at `inner[12..13]`. Length values are still useful as dispatch
+keys where a length is unique in practice:
+
+| `inner[3]` (length) | Carries                          | Identity check                            |
+| ------------------- | -------------------------------- | ----------------------------------------- |
+| `0x8a` (138 B)      | Periodic snapshot (~every 5 min) | machine-state `0x02`; see §5              |
+| `0x53` (83 B)       | Motor-controller ramp            | `inner[12]=0x18`, step `0x12..0x1f`; §4.3 |
+| `0x41` (65 B)       | **Door event** (info-class)      | `inner[12]=0x06, inner[13]=0x10`; §4.2    |
+| other               | Status packet                    | decode per §2–§4                          |
+
+⚠ Never key an event on length alone without a content check — the former
+door decode keyed on lengths `0x63`/`0x4c` (99/76-byte frames) and read
+"open" from unrelated telemetry through entire cycles (§8.1, resolved).
 
 ## 2. Status packets
 
@@ -173,18 +187,28 @@ End. [confirmed]
 
 ### 3.4 Spin-speed codes — `sub[3]`
 
-| byte   | rpm                                                         | confidence  |
-| ------ | ----------------------------------------------------------- | ----------- |
-| `0x06` | 400                                                         | [confirmed] |
-| `0x08` | 800                                                         | [confirmed] |
-| `0x09` | 1000                                                        | [confirmed] |
-| `0x0c` | 1200                                                        | [confirmed] |
-| `0x01` | 1400                                                        | [confirmed] |
-| `0x04` | ? (default of Sportkläder and Hand/Ull — likely 600 or 800) | [unmapped]  |
-| `0x27` | ? (seen in a Blandmaterial final spin)                      | [unmapped]  |
+All six wheel positions, cloud-correlated live via a full spin-button scroll
+(2026-06-12, two complete wheel revolutions, binary↔cloud transitions paired
+1:1, plus course-default cross-checks). [cloud-correlated]
 
-A 2-minute spin-speed scroll with the cloud feed running would close both
-gaps (same method as the course validation).
+| byte   | rpm                   |
+| ------ | --------------------- |
+| `0x01` | 400                   |
+| `0x04` | 800                   |
+| `0x06` | 1000                  |
+| `0x08` | 1200                  |
+| `0x09` | 1400                  |
+| `0x0c` | 0 (`SPIN_DRAIN_ONLY`) |
+
+Wheel order: 400 → 800 → 1000 → 1200 → 1400 → drain-only → wrap.
+
+**History lesson (same as the dryer's course table):** the previous map —
+assembled from in-cycle observation without cloud correlation — was shifted
+by **two wheel positions** on every entry (`0x06` was read as 400; it is 1000) and had been wrongly tagged [confirmed]. Only a live correlated scroll
+is trustworthy. `0x27` (seen transiently during drain) is not a wheel
+setting; unknown codes must keep the last published value [unmapped].
+Course-default cross-checks: Sportkläder and Hand/Ull default to `0x04`
+(800), Eco 40-60 to `0x09` (1400), Tub Clean to `0x0c` (drain-only).
 
 ## 4. Auxiliary packet types
 
@@ -199,10 +223,35 @@ gaps (same method as the course validation).
 [confirmed] Machine-state byte in these packets is `0x02` — intercept on
 `inner[3] = 0x8a` _before_ any state-table lookup.
 
-### 4.2 Info-class pause packets
+### 4.2 Info-class event packets
 
-Info-class packets have `inner[8] = 0x02` and machine-state `0x03`, with a
-code at `inner[13]` mirrored at `inner[17]`:
+#### Door events [cloud-correlated]
+
+65-byte info-class frames (`inner[8]=0x02`, machine-state `0x03`) with shape
+`inner[12]=0x06` and event code `inner[13]=0x10` — the same code the dryer
+uses for its door event. Door state is at `inner[18]`:
+
+| `inner[18]` | meaning |
+| ----------- | ------- |
+| `0x01`      | open    |
+| `0x02`      | closed  |
+
+Verified 2026-06-12: seven alternating events during an idle door test, one
+event when the door was closed before the morning's cycle, and the cloud's
+`doorLock: ON` arriving seconds after the final close (remote-start arming
+locks the door). These frames fire **only** on actual door motion — zero
+occurrences mid-cycle in any capture. The frame also carries the model
+string (`VCDWL2QEUK`). A `[13]=0x11` variant with `[18]=0x04` exists
+(observed once, programme-scroll evening) — different event, semantics
+unknown; the `[13]=0x10` check excludes it.
+
+Door events while the machine is fully asleep (panel dark, no session) have
+not been observed — the keepalive state byte flip (`e8`→`e9`) at session
+start is a possible but unconfirmed door/session signal.
+
+#### Pause codes
+
+Info-class packets with a code at `inner[13]` mirrored at `inner[17]`:
 
 | code   | meaning                                                           |
 | ------ | ----------------------------------------------------------------- | ------------------------------------------ |
@@ -284,17 +333,21 @@ with a real course byte and garbage elsewhere. Two live incidents:
 
 ## 8. Known bugs / open questions
 
-1. **Door events are unreliable.** A 0x63-byte-_long_ info packet collides
-   with the `inner[3] = 0x63` door-open intercept: the door sensor reads
-   "open" through entire cycles. Real door events may be the short
-   `aa 08 20 …` frames (currently discarded as too short). Needs an
-   idle door-open/close capture to resolve. **Do not ship a door sensor
-   from `inner[3]` alone.**
+1. ~~Door events are unreliable~~ **RESOLVED 2026-06-12**: `inner[3]` turned
+   out to be the frame-length byte (§1), so the old `0x63`/`0x4c` "door
+   types" were just 99/76-byte telemetry frames. Real door events are the
+   65-byte info-class frames in §4.2, confirmed by an idle door-test capture.
 2. Activity labels for `0x03`/`0x26`/`0x02` (Detecting/Filling/pre-wash)
    are best-guess; confirm on a programme with a weigh step (Bomull/Eco).
-3. Spin bytes `0x04` and `0x27` unmapped (§3.4).
+3. ~~Spin bytes `0x04` and `0x27` unmapped~~ **RESOLVED 2026-06-12**: full
+   wheel cloud-correlated (§3.4); the whole previous map was shifted.
+   `0x27` is a transient drain value, not a setting.
 4. If a cycle ends while paused, pause-duration accounting upstream of the
    protocol (HA automation layer here) may need to close the open pause.
+5. The `[13]=0x11 / [18]=0x04` info-event variant (§4.2) — semantics
+   unknown, observed once.
+6. Door behaviour while fully asleep (no session) unobserved — unknown
+   whether motion is reported at all before the panel wakes.
 
 ## 9. Suggested entity model
 
@@ -310,6 +363,7 @@ What this decoder publishes, all live-validated:
 | spin speed (rpm)                                                       | `sub[3]`                            |
 | cycle energy (Wh)                                                      | `10 08` block                       |
 | elapsed / phase-remaining / water temp                                 | `0x8a` snapshot                     |
+| door (open/closed)                                                     | info-class door event, §4.2         |
 | derived "stage" with exactly-once Done                                 | explicit FSM, see `stage_fsm.ts`    |
 
 ## 10. Known but undecoded packet types

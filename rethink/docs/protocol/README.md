@@ -29,6 +29,10 @@ AA <length> <inner bytes…> <checksum> BB
 ```
 
 - `length` = inner length + 4
+- A `length` byte of `0xff` is an **escape**: the real length is at `buf[5]`
+  (= `inner[3]`). This is why long-frame `inner[3]` values were historically
+  mistaken for "packet types" — they are frame lengths (washer spec §1;
+  verified over 9,600+ frames on both machines, 2026-06-12).
 - `checksum` = (sum of all preceding bytes, including AA and length) & 0xFF, XOR 0x55
 - All multi-byte integers inside `inner` are **little-endian** unless noted.
 

@@ -52,7 +52,8 @@ describe(MODEL_ID, () => {
         assert.equal(p.run_state, 'Standby')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
-        assert.equal(p.spin, 400)
+        // sp=0x06 = 1000 rpm (Blandmaterial default; cloud-correlated 2026-06-12)
+        assert.equal(p.spin, 1000)
         assert.equal(p.temp, '40')
     })
 
@@ -409,7 +410,8 @@ describe(MODEL_ID, () => {
         // into an active cycle — wrong.
         assert.equal(p.cycle_phase, 'Washing')
         assert.equal(p.course, 'Turbowash 39')
-        assert.equal(p.spin, 800)
+        // sp=0x08 = 1200 rpm (Turbowash 39 default; cloud-correlated 2026-06-12)
+        assert.equal(p.spin, 1200)
         assert.equal(p.remaining_time, 55)
     })
 
@@ -420,7 +422,7 @@ describe(MODEL_ID, () => {
         // Fresh device: cache is empty, so DisplayOn publishes Standby to flush any stale retained value.
         assert.equal(p.run_state, 'Standby')
         assert.equal(p.course, 'Turbowash 39')
-        assert.equal(p.spin, 800)
+        assert.equal(p.spin, 1200)
     })
 
     test('0x00-variant DisplayOn during active run → run_state stays Running (cache-check guards mid-cycle)', () => {
@@ -439,7 +441,7 @@ describe(MODEL_ID, () => {
         assert.equal(p.run_state, 'Running')
         assert.equal(p.cycle_phase, 'Rinsing')
         assert.equal(p.course, 'Turbowash 39')
-        assert.equal(p.spin, 800)
+        assert.equal(p.spin, 1200)
         assert.equal(p.remaining_time, 28)
     })
 
@@ -464,9 +466,9 @@ describe(MODEL_ID, () => {
         assert.equal(p.run_state, 'Standby')
         assert.equal(p.cycle_phase, 'Idle')
         assert.equal(p.course, 'Blandmaterial')
-        // Broadcast-lag: appliance had not committed SP=0x0c (1200rpm) yet;
-        // the status sub-block still carries SP=0x06 (400rpm).
-        assert.equal(p.spin, 400)
+        // Broadcast-lag: appliance had not committed the 1200 rpm selection
+        // (SP=0x08) yet; the status sub-block still carries SP=0x06 (1000 rpm).
+        assert.equal(p.spin, 1000)
         assert.equal(p.temp, '40')
     })
 
@@ -527,31 +529,34 @@ describe(MODEL_ID, () => {
     })
 
     // Spin scroll captures. Expected values reflect the LAST sub-block.
+    // Expected rpm per the cloud-correlated 2026-06-12 map: the scanner picks
+    // the LAST sub-block, so each case asserts that block's sp byte.
+    // Wheel order (byte): 01→04→06→08→09→0c = 400→800→1000→1200→1400→drain.
     const SPIN_CASES: [string, string, number][] = [
         [
-            'from-400 scroll',
+            'scroll lands on sp=0x08',
             'aaff200a0076000214000100ec006400050810062b00000000000000007000700000002b010000000000031a040101755a0000000200041800000000000004000000050810082b00000000000000007000700000002b010000000000031a040101755a00000002000418000000000000040000546fbb',
-            800,
-        ],
-        [
-            'from-800 scroll',
-            'aaff200a0076000215000100ec006400050810082b00000000000000007000700000002b010000000000031a040101755a0000000200041800000000000004000000050810092b00000000000000007300730000002b010000000000031a040101755a00000002000418000000000000040000a6bbbb',
-            1000,
-        ],
-        [
-            'from-1000 scroll',
-            'aaff200a0076000217000100ec006400050810092b00000000000000007300730000002b010000000000031a040101755a00000002000418000000000000040000000508100c2b00000000000000006600660000002b010000000000031a040101755a00000002000418000000000000040000b307bb',
             1200,
         ],
         [
-            'from-1200 scroll',
-            'aaff200a0076000218000100ec0064000508100c2b00000000000000006600660000002b010000000000031a040101755a0000000200041800000000000004000000050810012b00000000000000006800680000002b010000000000031a040101755a000000020004180000000000000400007ef2bb',
+            'scroll lands on sp=0x09',
+            'aaff200a0076000215000100ec006400050810082b00000000000000007000700000002b010000000000031a040101755a0000000200041800000000000004000000050810092b00000000000000007300730000002b010000000000031a040101755a00000002000418000000000000040000a6bbbb',
             1400,
         ],
         [
-            'from-1400 scroll',
-            'aaff200a0076000219000100ec006400050810012b00000000000000006800680000002b010000000000031a040101755a0000000200041800000000000004000000050810042b00000000000000006a006a0000002b010000000000031a040101755a000000020004180000000000000400005450bb',
+            'scroll lands on sp=0x0c (drain only)',
+            'aaff200a0076000217000100ec006400050810092b00000000000000007300730000002b010000000000031a040101755a00000002000418000000000000040000000508100c2b00000000000000006600660000002b010000000000031a040101755a00000002000418000000000000040000b307bb',
             0,
+        ],
+        [
+            'scroll lands on sp=0x01',
+            'aaff200a0076000218000100ec0064000508100c2b00000000000000006600660000002b010000000000031a040101755a0000000200041800000000000004000000050810012b00000000000000006800680000002b010000000000031a040101755a000000020004180000000000000400007ef2bb',
+            400,
+        ],
+        [
+            'scroll lands on sp=0x04',
+            'aaff200a0076000219000100ec006400050810012b00000000000000006800680000002b010000000000031a040101755a0000000200041800000000000004000000050810042b00000000000000006a006a0000002b010000000000031a040101755a000000020004180000000000000400005450bb',
+            800,
         ],
     ]
     for (const [label, hex, expectedSpin] of SPIN_CASES) {
@@ -733,6 +738,51 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.elapsed_time, undefined)
     })
 
+    // Real door events captured live 2026-06-12 10:20 (idle door test, seven
+    // alternating open/close events, cloud-correlated via the doorLock
+    // follow-up). 65-byte info-class frames: inner[12]=0x06, event code
+    // inner[13]=0x10, door state at inner[18] (0x01=open, 0x02=closed).
+    const DOOR_OPEN_INFO = buf(
+        'aaff200a0041002798000201030006100e0102100101050025564344574c325145554b000000000000000000000102c2220b8b010700000000000000000065c3bb',
+    )
+    const DOOR_CLOSE_INFO = buf(
+        'aaff200a0041002799000201030006100e0102100201050025564344574c325145554b000000000000000000000102c2220b8b0107000000000000000000a2f0bb',
+    )
+    // 99-byte info-class telemetry ([12]=0x28, [13]=0x1e) captured 10:21:51
+    // while the user scrolled the spin wheel, door untouched. The old decoder
+    // keyed door on inner[3]=0x63 — which is the frame-LENGTH byte (0x63=99) —
+    // and published a false "open" for every such frame.
+    const INFO_99_TELEMETRY = buf(
+        'aaff200a00630027a40002010300281e0e01021e00e400430100000a0008002100210021002100210021002103dc00022a47001b63006301050025564344574c325145554b000000000000000000000102c3220b8b0107000000000000000000f9acbb',
+    )
+
+    test('door event frame ([12]=0x06, [13]=0x10, [18]=0x01) publishes door=open', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DOOR_OPEN_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'open')
+    })
+
+    test('door event frame ([18]=0x02) publishes door=closed', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DOOR_OPEN_INFO)
+        thinq.emit('data', DOOR_CLOSE_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'closed')
+    })
+
+    test('99-byte info telemetry does NOT publish door (regression: false open through entire cycles)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', INFO_99_TELEMETRY)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, undefined)
+    })
+
+    test('door event does not affect run_state or the stage machine', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        thinq.emit('data', DOOR_OPEN_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Running')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+    })
+
     test('setProperty is a no-op (sensors-only v1)', () => {
         const { thinq, dev } = makeDevice()
         thinq.resetRecorder()
@@ -772,7 +822,7 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
         assert.equal(ha.devices[DEVICE_ID].properties.temp, '40')
         assert.equal(ha.devices[DEVICE_ID].properties.course, 'Blandmaterial')
-        assert.equal(ha.devices[DEVICE_ID].properties.spin, 400)
+        assert.equal(ha.devices[DEVICE_ID].properties.spin, 1000)
     })
 
     // Captured 16:56:19 — Blandmaterial with 84 min remaining, pre-wash idle phase.
@@ -791,7 +841,7 @@ describe(MODEL_ID, () => {
         // the drum was already filling/tumbling)
         assert.equal(p.cycle_phase, 'Washing')
         assert.equal(p.course, 'Blandmaterial')
-        assert.equal(p.spin, 400)
+        assert.equal(p.spin, 1000)
         assert.equal(p.remaining_time, 83)
         // temp must NOT be published when sub[20]=0x0b (active-running sub-block)
         assert.equal(p.temp, undefined)

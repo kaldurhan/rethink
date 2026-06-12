@@ -12,6 +12,12 @@ All offsets are inside `inner` (envelope stripped). Dryer frames have
 
 ## 1. Packet classification
 
+**Note:** `inner[3]` is the frame-length byte, not a packet type (washer
+spec §1; verified on dryer frames too — `0x78` = 120-byte main status,
+`0x58` = 88-byte End, `0xb0` = 176-byte energy frame). The classification
+below already keys on content (`inner[8]`, lengths, state byte), which is
+why it survived that discovery unchanged.
+
 Process in this order:
 
 1. `inner[0] != 0x30` → ignore (telemetry/noise frames like `0x31` appear).
