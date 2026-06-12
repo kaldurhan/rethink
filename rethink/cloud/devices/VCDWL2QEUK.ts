@@ -421,6 +421,11 @@ export default class Device extends AABBDevice {
 
         if (st !== 0xeb && !isPassiveBlock) {
             this.publishProperty('run_state', stateLabel)
+            // A running drum physically implies a closed door. Closing the
+            // door of a SLEEPING machine emits no event (only opening wakes
+            // it — live 2026-06-12), so without this inference the door
+            // sensor sticks at 'open' through entire cycles.
+            if (st === 0xec) this.publishProperty('door', 'closed')
             if (st === 0xec) this.stageFsm!.dispatch('cycleActive')
             if (st === 0x04 || st === 0xe2) this.stageFsm!.dispatch('ended')
             if (st === 0x0b) this.stageFsm!.dispatch('standby')

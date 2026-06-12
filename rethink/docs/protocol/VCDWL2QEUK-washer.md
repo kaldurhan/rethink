@@ -251,6 +251,13 @@ this event (no `[13]=0x10` fires for it), so a door decoder must also map
 `(0x11, cause 0x04)` → open. Subsequent motion uses normal `[13]=0x10`
 events. Other wake causes (power button does **not** emit `0x11`) unknown.
 
+**Close-from-sleep is silent** [confirmed live 2026-06-12]: closing the door
+does _not_ wake the machine and emits no event, so the sensor can stick at
+"open" indefinitely. Required mitigation: a non-passive Running block
+physically implies a closed door — infer `door = closed` from it. Coverage
+after both rules: opens always detected; closes detected while the panel is
+awake, otherwise corrected at the next cycle start.
+
 #### Pause codes
 
 Info-class packets with a code at `inner[13]` mirrored at `inner[17]`:

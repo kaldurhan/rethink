@@ -796,6 +796,16 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
     })
 
+    test('active Running block infers door=closed (close-from-sleep emits no event)', () => {
+        const { ha, thinq } = makeDevice()
+        // Door left 'open' from a sleep-time test, then the user silently
+        // closes it and starts a cycle — the running block must correct it.
+        thinq.emit('data', DOOR_OPEN_INFO)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'open')
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'closed')
+    })
+
     test('setProperty is a no-op (sensors-only v1)', () => {
         const { thinq, dev } = makeDevice()
         thinq.resetRecorder()
