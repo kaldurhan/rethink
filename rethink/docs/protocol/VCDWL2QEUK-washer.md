@@ -409,7 +409,8 @@ drawer-event candidate, but the only two samples have dissimilar payloads.
 Related cloud-only observations from that incident: drawer close and the
 `ezDetergentState: EZCSDT_EMPTY` warning produced **no** identified binary
 frames, and the cloud `error` field stayed `ERROR_NO` — a mid-cycle drawer
-pull is a warning, not an error state.
+pull surfaces as a panel warning ("dispenser open", user-confirmed), not an
+error state. A true error capture still requires a cycle-halting fault.
 
 `0x8a` extras beyond the three published fields (§4.1): `inner[31..35]` is a
 run of five temperature sensor points (36–49 °C during rinse; only `[31]` is
