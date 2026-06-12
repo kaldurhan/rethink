@@ -4,6 +4,7 @@ import { type Metadata } from '../thinq'
 import AABBDevice from './aabb_device'
 import HADevice from './base'
 import { DRYER_TABLE } from './stage_fsm'
+import log from '@/util/logging'
 
 // ─── Lookup tables ────────────────────────────────────────────────────────────
 
@@ -61,22 +62,30 @@ function decodePhase(phA: number, phB: number): string {
     return PHASES[(phA << 8) | phB] ?? `unknown (${phA.toString(16)} ${phB.toString(16)})`
 }
 
-// TR byte when ST=0xeb and phA=0x05 — dryness level
-const DRYNESS: Record<number, string> = {
-    0x1e: 'Iron Dry',
-    0x41: 'Cupboard Dry',
-    0x46: 'Extra Dry',
+// inner[14] in double-block frames — dryness level SETTING. Cloud-correlated
+// 2026-06-12 against dryLevel. (The old TR-based decode read programme
+// DURATIONS that co-varied with the setting — spec §2.2.)
+const DRYNESS_LEVELS: Record<number, string> = {
+    0x00: 'None', // courses without a dryness setting (e.g. Timed Dry)
+    0x01: 'Damp Dry',
+    0x03: 'Iron Dry',
+    0x05: 'Very Dry',
 }
 
-// TR byte when ST=0xeb and phA≠0x05 — drying mode
-const DRYING_MODE: Record<number, string> = {
-    0x46: 'Efficiency',
-    0x96: 'Turbo',
+// inner[15] in double-block frames — ecoHybrid mode setting. Cloud-correlated
+// 2026-06-12 against ecoHybrid. 0x00 = field not populated (power-on) — skip.
+const ECO_HYBRID: Record<number, string> = {
+    0x02: 'Normal',
+    0x03: 'Turbo',
 }
 
 // ─── Device class ─────────────────────────────────────────────────────────────
 
 export default class Device extends AABBDevice {
+    // Last unknown phase tuple already logged — frames repeat every few
+    // seconds, so without this gate an unknown tuple floods the add-on log.
+    private loggedUnknownTuple = -1
+
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
         this.setConfig({
@@ -126,6 +135,14 @@ export default class Device extends AABBDevice {
                     name: 'Time remaining',
                     unit_of_measurement: 'min',
                     icon: 'mdi:timer-outline',
+                },
+                initial_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-initial-time',
+                    state_topic: '$this/initial_time',
+                    name: 'Programme duration',
+                    unit_of_measurement: 'min',
+                    icon: 'mdi:timer-sand',
                 },
                 stage: {
                     platform: 'sensor',
@@ -249,10 +266,11 @@ export default class Device extends AABBDevice {
         // Startup (0x0100 — identical to the first ~8 s of a real cycle).
         let phase: string | null = null
         let phA = 0
+        let phB = 0
         let knownPhase = false
         if (inner.length >= 24) {
             phA = hasSub2 ? inner[sub2Start + 13] : inner[14]
-            const phB = hasSub2 ? inner[sub2Start + 14] : inner[15]
+            phB = hasSub2 ? inner[sub2Start + 14] : inner[15]
             knownPhase = ((phA << 8) | phB) in PHASES
             phase = decodePhase(phA, phB)
         }
@@ -299,7 +317,27 @@ export default class Device extends AABBDevice {
         if (st !== 0x04) {
             this.publishProperty('program', COURSES[cs] ?? `unknown (0x${cs.toString(16).padStart(2, '0')})`)
         }
-        this.publishProperty('phase', phase)
+
+        // Phase: End/AntiCrease display Finished (washer parity); unknown
+        // tuples keep the last value and log once — publishing the raw tuple
+        // left 'unknown (3 1)' on the sensor after every cycle.
+        if (st === 0x04 || st === 0xe2) {
+            this.publishProperty('phase', 'Finished')
+        } else if (knownPhase) {
+            this.publishProperty('phase', phase)
+        } else if (((phA << 8) | phB) !== this.loggedUnknownTuple) {
+            log('status', this.id, `unknown phase tuple (0x${phA.toString(16)}, 0x${phB.toString(16)})`)
+            this.loggedUnknownTuple = (phA << 8) | phB
+        }
+
+        // Settings live at single-block offsets in double-block frames only —
+        // 69-byte DisplayOn frames carry zeros there (spec §2.2).
+        if (hasSub2) {
+            const dryness = DRYNESS_LEVELS[inner[14]]
+            if (dryness !== undefined) this.publishProperty('dryness_level', dryness)
+            const mode = ECO_HYBRID[inner[15]]
+            if (mode !== undefined) this.publishProperty('drying_mode', mode)
+        }
 
         if (st === 0xec && !isUnknownRunning) {
             // Idle (selection display) and Startup (0x0100 — broadcast both
@@ -309,7 +347,12 @@ export default class Device extends AABBDevice {
             // unknown tuples gated above, only positively identified active
             // phases reach cycleActive.
             if (phase !== 'Idle' && phase !== 'Startup') {
+                // Cycle-start edge: TR still equals the programme duration
+                // (= cloud initialTimeMinute, spec §2.2) on the first active
+                // frame — capture it for % progress before remaining counts.
+                const wasIdle = this.stageFsm!.stage === 'Off' || this.stageFsm!.stage === 'Done'
                 this.stageFsm!.dispatch('cycleActive')
+                if (wasIdle && tr > 0) this.publishProperty('initial_time', tr)
                 // A positively identified active phase implies a closed door
                 // (washer parity: closing a sleeping machine's door is silent).
                 this.publishProperty('door', 'closed')
@@ -319,16 +362,12 @@ export default class Device extends AABBDevice {
             else if (phase === 'Cooldown' || phase === 'Finishing') this.stageFsm!.dispatch('coolPhase')
         }
 
-        // TR interpretation is ST-dependent
+        // TR while running = minutes remaining. While ST=0xeb/selection it is
+        // the programme duration (captured as initial_time at cycle start);
+        // dryness/mode decode from inner[14]/[15] above — the old TR-based
+        // dryness/mode decode read durations, not settings (spec §2.2).
         if (st === 0xec && !isUnknownRunning) {
             this.publishProperty('remaining_time', tr)
-        } else if (st === 0xeb) {
-            // DisplayOn: phA=0x05 → dryness level; otherwise → drying mode
-            if (phA === 0x05) {
-                this.publishProperty('dryness_level', DRYNESS[tr] ?? `unknown (0x${tr.toString(16)})`)
-            } else {
-                this.publishProperty('drying_mode', DRYING_MODE[tr] ?? `unknown (0x${tr.toString(16)})`)
-            }
         }
         // ST=0xe2 (AntiCrease) or 0x04 (End): TR not published
     }

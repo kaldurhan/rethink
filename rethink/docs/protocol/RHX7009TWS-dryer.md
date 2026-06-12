@@ -162,10 +162,12 @@ from End packets — keep the programme that actually ran. [confirmed]
 
 **Critical rule: unknown phase tuples must be treated as untrusted.** An
 `0xec` packet with an unmapped tuple may not claim running, may not drive a
-cycle state machine, and may not update remaining-time (publishing the raw
-tuple to a diagnostic sensor is fine). A blocklist approach ("anything not
-Idle/Startup is active") caused a duplicate cycle-finished event live —
-positively identify activity instead. [confirmed]
+cycle state machine, and may not update remaining-time. Don't publish the
+raw tuple to the phase sensor either — post-cycle chatter left
+`unknown (3 1)` displayed for hours; keep the last value and log once.
+End/AntiCrease display `Finished` (washer parity). A blocklist approach
+("anything not Idle/Startup is active") caused a duplicate cycle-finished
+event live — positively identify activity instead. [confirmed]
 
 ## 5. Info-class packets (`inner[8] = 0x02`)
 

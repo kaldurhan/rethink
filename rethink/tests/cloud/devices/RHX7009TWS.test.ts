@@ -92,18 +92,18 @@ const FINISHED = buf(
     'aaff300a0058008e460001010400460303010105214009031e08dc000f00f0dc00000000000900000004000401f100f800000f111010000000001000f20001000000000100000000001a04f336481a20fc0cc0cd0c848bbb',
 )
 
-// Synthetic fixtures: no real capture of drying-mode browsing exists yet, so
-// these derive from DISPLAY_ON_IDLE with phA (inner[14]) forced ≠0x05 and TR
-// (inner[23]) set to a drying-mode byte. processData does not verify the
-// checksum, so byte mutation is safe. Replace with real captures when taken.
-function withInnerBytes(src: Buffer, edits: Record<number, number>): Buffer {
-    const copy = Buffer.from(src)
-    for (const [innerIdx, val] of Object.entries(edits)) copy[Number(innerIdx) + 2] = val
-    return copy
-}
-const DISPLAY_ON_MODE_TURBO = withInnerBytes(DISPLAY_ON_IDLE, { 14: 0x01, 23: 0x96 })
-const DISPLAY_ON_MODE_EFFICIENCY = withInnerBytes(DISPLAY_ON_IDLE, { 14: 0x01, 23: 0x46 })
-const DISPLAY_ON_MODE_UNKNOWN = withInnerBytes(DISPLAY_ON_IDLE, { 14: 0x01, 23: 0x12 })
+// Real 120-byte selection frames from the 2026-06-12 dryness/mode panel
+// scrolls, cloud-correlated against dryLevel/ecoHybrid in real time.
+// Settings live at single-block offsets: [14]=dryness, [15]=ecoHybrid.
+const SCROLL_VERYDRY_TURBO = buf(
+    'aaff300a007800baeb000100ec0066000503000006000000004600460100000200000406000000200000810500000000000000000000000000006400040078000000000103000006000000001e001e010000020000040600000020000081050000000000000000000000000000640004007800000016f7bb',
+)
+const SCROLL_DAMP_TURBO = buf(
+    'aaff300a007800baec000100ec0066000103000006000000001e001e01000002000004060000002000008105000000000000000000000000000064000400780000000003030000060000000041004101000002000004060000002000008105000000000000000000000000000064000400780000002f87bb',
+)
+const SCROLL_IRON_NORMAL = buf(
+    'aaff300a007800bafd000100ec0066000302000005000000005a005a01000002000004050000002000008105000000000000000000000000000064000400780000000003030000050000000050005001000002000004050000002000008105000000000000000000000000000064000400780000001bc8bb',
+)
 
 function makeDevice() {
     const ha = new MockHAConnection()
@@ -175,30 +175,37 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Idle')
     })
 
-    test('display-on with phA≠0x05 TR=0x96 → drying_mode=Turbo, dryness_level untouched', () => {
+    test('120-byte selection frames publish dryness/mode from [14]/[15] (cloud-correlated scroll)', () => {
         const { ha, thinq } = makeDevice()
-        thinq.emit('data', DISPLAY_ON_MODE_TURBO)
+        thinq.emit('data', SCROLL_VERYDRY_TURBO)
+        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, 'Very Dry')
         assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, 'Turbo')
-        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, undefined)
+        thinq.emit('data', SCROLL_DAMP_TURBO)
+        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, 'Damp Dry')
+        thinq.emit('data', SCROLL_IRON_NORMAL)
+        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, 'Iron Dry')
+        assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, 'Normal')
     })
 
-    test('display-on with phA≠0x05 TR=0x46 → drying_mode=Efficiency (same TR byte as Extra Dry dryness)', () => {
-        const { ha, thinq } = makeDevice()
-        thinq.emit('data', DISPLAY_ON_MODE_EFFICIENCY)
-        assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, 'Efficiency')
-        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, undefined)
-    })
-
-    test('display-on with phA≠0x05 and unmapped TR → drying_mode falls back to unknown hex', () => {
-        const { ha, thinq } = makeDevice()
-        thinq.emit('data', DISPLAY_ON_MODE_UNKNOWN)
-        assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, 'unknown (0x12)')
-    })
-
-    test('display-on-idle → dryness_level=Extra Dry (TR=0x0046 in idle context)', () => {
+    test('69-byte DisplayOn publishes neither dryness nor mode (settings absent in single-block frames)', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', DISPLAY_ON_IDLE)
-        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, 'Extra Dry')
+        assert.equal(ha.devices[DEVICE_ID].properties.dryness_level, undefined)
+        assert.equal(ha.devices[DEVICE_ID].properties.drying_mode, undefined)
+    })
+
+    test('initial_time captured at cycle start; End/AntiCrease publish phase=Finished; unknown tuples keep last phase', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        assert.equal(ha.devices[DEVICE_ID].properties.initial_time, undefined, 'selection must not set initial_time')
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.initial_time, 29, 'first active frame TR = programme duration')
+        thinq.emit('data', FINISHED)
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Finished')
+        // §6.2 anti-crease trap frame: unknown tuple must keep phase=Finished,
+        // not publish 'unknown (4 0)'.
+        thinq.emit('data', ANTICREASE_TUMBLE_TR1)
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Finished')
     })
 
     test('quick-dry-30 selected → run_state falls back to Standby, program=Quick Dry 30', () => {

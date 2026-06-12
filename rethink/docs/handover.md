@@ -114,20 +114,21 @@ remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures di
    as packet type `0xb0`, 79×/cycle) is undecoded. See dryer spec §10.
 10. ~~`0x07` pause code~~ **CLOSED 2026-06-12**: real door pause emits 0x0c
     (same as panel pause); 0x07 dropped. Dryer door sensor implemented (gap 13b).
-11. **`dryness_level` and `drying_mode` sensors decode the wrong bytes** —
-    the 2026-06-12 panel scrolls showed both were reading programme
-    _durations_ that co-varied with the settings (spin-map-class error). Real
-    fields: dryness at `inner[14]` (1=Damp, 3=Iron, 5=VeryDry), ecoHybrid at
-    `inner[15]` (2=Normal, 3=Turbo) — dryer spec §2.2. Rework needs the
-    in-cycle layout question answered first (spec §8.5: these offsets hold
-    the phase tuple while running).
+11. ~~dryness_level/drying_mode decode wrong bytes~~ **REWORKED 2026-06-12**
+    (pending release): both now read the real setting fields in 120-byte
+    frames — dryness `inner[14]` (None/Damp/Iron/Very Dry), ecoHybrid
+    `inner[15]` (Normal/Turbo), cloud-correlated (spec §2.2). The old
+    TR-duration decode is gone; phase also no longer publishes raw unknown
+    tuples (keeps last, logs once; End/AntiCrease show Finished).
 12. **`ST=0x03` (Cooldown) dispatches `ended`, not `coolPhase`**
     (`RHX7009TWS.ts:259`). Benign in all captures (only seen at end-of-cycle),
     but the intent is unpinned — a mid-cycle Cooldown-ST packet would latch Done
     early. Add a comment or test pinning why.
-13. **Total-time field found** (2026-06-12): TR during selection = programme
-    duration (= cloud `initialTimeMinute`), spec §2.2. Remaining work:
-    capture it at cycle start in the decoder → % progress sensor.
+13. ~~Total-time field~~ **IMPLEMENTED 2026-06-12** (pending release): new
+    `initial_time` sensor — TR captured at the cycle-start edge (first
+    positively identified active frame, where TR still equals the programme
+    duration). % progress derivable in HA from initial vs remaining. Washer
+    equivalent (`sub[15]`, gap 6) still open.
     13b. ~~Dryer door sensor~~ **IMPLEMENTED 2026-06-12** (pending release): door
     event `[31]` (0x01=open, polarity confirmed mid-cycle) + active-phase
     closed-inference, washer parity (spec §5).
