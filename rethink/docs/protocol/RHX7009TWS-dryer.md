@@ -44,7 +44,7 @@ Process in this order:
 | value  | state                                                                |
 | ------ | -------------------------------------------------------------------- |
 | `0x0b` | Standby                                                              |
-| `0xeb` | DisplayOn (panel awake; TR carries dryness/mode, §2.2)               |
+| `0xeb` | DisplayOn (panel awake; TR carries the programme duration, §2.2)     |
 | `0xec` | Running — **also broadcast during selection and post-cycle**, see §6 |
 | `0x03` | Cooldown                                                             |
 | `0xe2` | AntiCrease (post-end)                                                |
