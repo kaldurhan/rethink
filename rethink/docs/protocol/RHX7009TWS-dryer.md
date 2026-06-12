@@ -265,15 +265,16 @@ standby     st=0b                   → Off
 
 ## 9. Suggested entity model
 
-| entity                                                     | source                                          |
-| ---------------------------------------------------------- | ----------------------------------------------- |
-| run state (Standby/Running/Paused/Cooldown/AntiCrease/End) | ST + §5/§6 rules                                |
-| programme                                                  | CS (never from End packets)                     |
-| phase (Idle/Heating/Drying/Cooldown/Finishing)             | phase tuple                                     |
-| remaining time (min)                                       | TR while running                                |
-| dryness level / drying mode                                | TR while DisplayOn (§2.2)                       |
-| door (open/closed)                                         | door event `[31]` + active-phase inference (§5) |
-| derived "stage" with exactly-once Done                     | explicit FSM, see `stage_fsm.ts`                |
+| entity                                                     | source                                              |
+| ---------------------------------------------------------- | --------------------------------------------------- |
+| run state (Standby/Running/Paused/Cooldown/AntiCrease/End) | ST + §5/§6 rules                                    |
+| programme                                                  | CS (never from End packets)                         |
+| phase (Idle/Heating/Drying/Cooldown/Finishing/Finished)    | phase tuple; Finished on End/AntiCrease (§4.2)      |
+| remaining time (min)                                       | TR while running                                    |
+| programme duration (min → % progress)                      | TR at the cycle-start edge (§2.2)                   |
+| dryness level / drying mode                                | `inner[14]` / `inner[15]` in 120-byte frames (§2.2) |
+| door (open/closed)                                         | door event `[31]` + active-phase inference (§5)     |
+| derived "stage" with exactly-once Done                     | explicit FSM, see `stage_fsm.ts`                    |
 
 ## 10. Packet-type census (full Mixed Fabrics cycle, 2026-06-06)
 

@@ -1,6 +1,6 @@
 # Rethink Development Handover
 
-**Last updated:** 2026-06-12 · deployed version **1.0.64** · suite **302 tests, all green** (`npm test`, ~2.5 s)
+**Last updated:** 2026-06-12 (evening) · deployed version **1.0.68** · suite **317 tests, all green** (`npm test`, ~2.5 s)
 
 ## What this project is
 
@@ -70,6 +70,30 @@ no duplicate Done. The two live failure modes that drove 1.0.60/1.0.61 are
 documented as the "duplicate-Done traps" in the dryer spec (§6) with the real
 packets as regression fixtures. 1.0.64 fixed the last cosmetic wart (post-cycle
 remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures dir.
+
+**Capture-day releases 1.0.65–1.0.68 (2026-06-12 afternoon/evening),** all
+live-validated except where noted:
+
+- **1.0.65** — corrected spin map (live: 1200 rpm shown correctly through a
+  full Blandmaterial cycle); door re-keyed to real events (live: mid-cycle
+  pause open/close detected; both Guard A and Guard B fired on real fakes).
+- **1.0.66** — washer wake-open + door-closed inference; activity `0x27`
+  (inter-rinse spin) → Rinsing; dryer door sensor; dryer pause set fixed to
+  `0x0c` only.
+- **1.0.67** — keepalive session bit (`0xe8` asleep / `0xe9` active) corrects
+  stale post-cycle run_state. ⚠ **Live flip validation still pending** at
+  session end: both machines had been left with doors ajar and the washer
+  hadn't returned to `e8` sleep yet — verify `run_state` reads Standby on
+  both machines next session (HA showed stale `AntiCrease` on the washer).
+- **1.0.68** — dryer dryness/mode from real setting fields `[14]/[15]`
+  (live: Very Dry / Turbo shown correctly, `unknown (0x0)` gone); phase
+  unknown-tuple policy (live: `unknown (3 1)` gone); new `initial_time`
+  sensor (validates at next dryer cycle start). Both door sensors verified
+  against physically-ajar doors.
+
+Operational notes from the day: after add-on **updates**, restart once more;
+after repeated restarts the Wi-Fi modules can deep-sleep with dead TLS
+sessions — a door-open or panel touch forces the reconnect.
 
 ## Open gaps (code ↔ spec audit, 2026-06-12)
 
