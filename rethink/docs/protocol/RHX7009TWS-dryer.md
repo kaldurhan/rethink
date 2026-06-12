@@ -222,3 +222,31 @@ standby     st=0b                   → Off
 | remaining time (min)                                       | TR while running                 |
 | dryness level / drying mode                                | TR while DisplayOn (§2.2)        |
 | derived "stage" with exactly-once Done                     | explicit FSM, see `stage_fsm.ts` |
+
+## 10. Packet-type census (full Mixed Fabrics cycle, 2026-06-06)
+
+`inner[3]` packet-type counts over one complete 70-min cycle
+(Mixed Fabrics, Turbo, VeryDry, 15:43–19:26), for orientation — the decoder
+classifies by `inner[8]`/length (§1), not by `inner[3]`:
+
+| `inner[3]` | ST           | count | description                                                           |
+| ---------- | ------------ | ----- | --------------------------------------------------------------------- |
+| `0x13`     | 0x0b Standby | 1     | short standby status                                                  |
+| `0x78`     | 0xec Running | 234   | main status (double-block, 116 bytes) — one per minute while running  |
+| `0x45`     | 0xe2 / 0xeb  | —     | short status (single-block, 65 bytes) — DisplayOn and AntiCrease      |
+| `0x58`     | 0x04 End     | 2     | end-of-cycle status (84 bytes)                                        |
+| `0x51`     | 0x03         | 25    | info-class — user events and routine chatter (see §5)                 |
+| `0x64`     | 0x03         | 7     | info-class — same pattern as 0x51; also fires mid-drying (~hourly)    |
+| `0x82`     | 0x03         | 2     | info-class — boot/init burst                                          |
+| `0x59`     | 0x03         | 1     | info-class — single occurrence at end of cycle                        |
+| `0xa4`     | 0x03         | 2     | info-class — pre-AntiCrease transition burst                          |
+| `0xb0`     | 0x02         | 79    | **periodic sensor/energy data** (~every 2.5 min), len 172 — undecoded |
+| `0x30`     | 0x4d         | 3     | course-list report — dropped                                          |
+
+**`0xb0` is the energy decode target.** 79 packets per cycle, len 172 —
+probably the same packets as the `0x75` info-class shape (len 172) in §5
+[best-guess, unverified]. The cloud's `periodicEnergyData` reports Wh per
+15-min interval; decoding `0xb0` against it would enable a local
+`course_spend_power` sensor like the washer's. No total-cycle-time field has
+been identified either (`sub2+10` is remaining only) — that blocks a %
+progress sensor.

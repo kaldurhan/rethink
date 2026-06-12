@@ -311,3 +311,44 @@ What this decoder publishes, all live-validated:
 | cycle energy (Wh)                                                      | `10 08` block                       |
 | elapsed / phase-remaining / water temp                                 | `0x8a` snapshot                     |
 | derived "stage" with exactly-once Done                                 | explicit FSM, see `stage_fsm.ts`    |
+
+## 10. Known but undecoded packet types
+
+Inventory from deep byte analysis of three Blandmaterial captures
+(2026-06-06: partial cycle, ~83-min near-full cycle, end-of-cycle window).
+None of these are decoded by the current implementation; they are catalogued
+here so future decoding starts from the known constants instead of zero.
+
+| `inner[3]` | ST     | inner len | what is known                                                                                                                                                                                                                           |
+| ---------- | ------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0x67`     | `0x03` | 99        | Per-minute rinse/spin sampler. `inner[12]=0x2c, [13]=0x07` constant; data bytes vary — correlate against cloud `remainTimeMinute`. **Most promising decode target.**                                                                    |
+| `0x88`     | `0x03` | 132       | Rinse-cycle event sentinel. Fires in bursts of 3 at each rinse start (3–4×/cycle). `inner[13]=0x06` constant; `~inner[21]` tracks elapsed minutes; `[14..20]` vary per burst (counter or energy accumulator). No load-level byte found. |
+| `0x8e`     | `0x03` | 138       | Wash→rinse transition marker — fires 8 s before cloud sees `RINSING`. All bytes constant (`inner[12]=0x53, [13]=0x04, [14]=0x0e`); the packet type itself is the signal.                                                                |
+| `0x9e`     | `0x03` | 154       | Large periodic, every ~10 min. `inner[12]=0x63, [13]=0x0f` constant. Purpose unknown — undecodable without more captures.                                                                                                               |
+| `0x80`     | `0x03` | —         | Appears once at end-of-cycle, just before End. Purpose unknown.                                                                                                                                                                         |
+| `0xa0`     | `0x03` | —         | Appears once at end-of-cycle, just after End. Purpose unknown.                                                                                                                                                                          |
+| `0x16`     | `0x4d` | 18        | Once per session after `TCLCount=2`. Purpose unknown. Low value.                                                                                                                                                                        |
+
+`0x8a` extras beyond the three published fields (§4.1): `inner[31..35]` is a
+run of five temperature sensor points (36–49 °C during rinse; only `[31]` is
+published); `inner[20]` and `inner[30]` are internal counters [confirmed but
+not published]. `0x53` extras: during the final spin, `inner[25+]` carries
+non-zero motor speed/torque data (zeros during gentle tumble) — units unknown;
+could expose instantaneous spin RPM if decoded.
+
+### Cloud-side fields with no known binary source
+
+For reference when hunting bytes (cloud values are correlation targets only —
+this project publishes nothing from the cloud feed):
+
+| cloud field             | values                                     | binary status                                                      |
+| ----------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| `loadLevel`             | `LOAD_LEVEL_1..9` (~1 min after door lock) | not found; needs light-vs-heavy paired captures                    |
+| `soilWash`              | `SOILWASH_HEAVY/LIGHT/NORMAL`              | not visible in `0x8a`; needs same-course different-soil comparison |
+| `turboWash`             | `TURBOWASH_ON/OFF`                         | not hunted                                                         |
+| `error`                 | `ERROR_NO`                                 | no binary equivalent confirmed; needs a real fault                 |
+| `initialTimeMinute`     | total programmed minutes                   | `sub[15]` low byte matches [best-guess]                            |
+| `accumulatedEnergyData` | running Wh total                           | binary `courseSpendPower` (§2.3) covers this                       |
+
+Cloud `state` progression over a normal cycle, for correlation:
+`INITIAL → DETECTING → DETERGENT_INPUT → RUNNING → RINSING → SPINNING → END`.
