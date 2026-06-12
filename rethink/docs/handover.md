@@ -166,6 +166,12 @@ promptly.
    (semver pattern strips the `v`; the tag must contain the fixed workflow or
    the image gets a `v` prefix and HA 404s)
 6. In HA: Settings → Add-ons → Rethink → Update
+7. **After the update, restart the add-on once more.** Container replacement
+   leaves the appliances holding half-open TLS sessions — they go silent for
+   10–15 min (debug WS reports `status: online` but zero frames) until their
+   Wi-Fi modules time out. An extra restart forces the immediate re-handshake
+   (observed live 2026-06-12, 1.0.64→1.0.65). In-place restarts don't have
+   this problem (~2 min recovery).
 
 Push to `master` alone publishes the `:dev` tag.
 
