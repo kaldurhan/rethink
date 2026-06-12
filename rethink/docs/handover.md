@@ -8,7 +8,7 @@ A fork of [anszom/rethink](https://github.com/anszom/rethink) — a local protoc
 **Working directory (WSL):** `/home/zorgin/project/rethink/rethink`  
 **HA addon slug:** `rethink` (store slug `daf7d2b6_rethink`)  
 **GHCR image:** `ghcr.io/kaldurhan/rethink`  
-**Deployed version:** 1.0.63 (2026-06-11)
+**Deployed version:** 1.0.64 (2026-06-12)
 
 ---
 
