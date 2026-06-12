@@ -3,9 +3,14 @@
 // its own file. Survives add-on restarts and never goes stale — unlike the
 // management debug WebSockets, which die silently on restarts (the failure
 // that cost the 2026-06-12 dryer-energy correlation its cloud reference).
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import log from '@/util/logging'
+
+// Capture files older than this are deleted at startup — capture mode left
+// on permanently writes a few MB/day per device and would otherwise grow
+// unbounded in /data.
+export const RETENTION_DAYS = 14
 
 let captureDir: string | null = null
 
@@ -13,8 +18,27 @@ export function initCapture(dir: string | null) {
     captureDir = dir
     if (dir) {
         mkdirSync(dir, { recursive: true })
+        sweepOldCaptures(dir)
         log('status', `raw capture enabled → ${dir}`)
     }
+}
+
+export function sweepOldCaptures(dir: string, now = Date.now()) {
+    const cutoff = now - RETENTION_DAYS * 24 * 3600 * 1000
+    let removed = 0
+    try {
+        for (const name of readdirSync(dir)) {
+            if (!name.endsWith('.ndjson')) continue
+            const path = join(dir, name)
+            if (statSync(path).mtimeMs < cutoff) {
+                unlinkSync(path)
+                removed++
+            }
+        }
+    } catch (err) {
+        log('status', `capture retention sweep failed: ${err}`)
+    }
+    if (removed) log('status', `capture retention: removed ${removed} file(s) older than ${RETENTION_DAYS} days`)
 }
 
 export function captureEnabled(): boolean {
