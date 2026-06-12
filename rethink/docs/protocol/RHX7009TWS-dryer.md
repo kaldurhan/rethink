@@ -72,15 +72,19 @@ panel scrolls, cloud-correlated against `dryLevel`/`ecoHybrid`):
 | `inner[14]` | dryness level  | `0x01` DAMPDRY · `0x03` IRON · `0x05` VERYDRY |
 | `inner[15]` | ecoHybrid mode | `0x02` NORMAL (Efficiency) · `0x03` TURBO     |
 
-Confirmed in 120-byte ST=`0xec` selection frames, where course also reads at
-`inner[18]` — i.e. selection frames expose these fields at _single-block_
-offsets even when double-block sized. In-cycle layout interaction with the
-phase tuple (which lives at the same single-block offsets) is **not yet
-pinned** — see §8. Consequence of TR-as-duration: captured at cycle start,
-it provides the total-time field for a % progress sensor. The `(05,03)`
-"Idle tuple" of §4.2 is actually _(dryness=VeryDry, mode=Turbo)_ — a
-settings pair, stable only because those were the user's habitual settings.
-TimeDry sub-scroll: cloud `timeDry` 30/40/50… with TR tracking 20–180 min.
+Confirmed in 120-byte ST=`0xec` frames — **both during selection and through
+an entire running cycle** (2026-06-12 Mixed Fabrics: `[14]/[15]` froze at
+`(05,03)` = VeryDry/Turbo for the full cycle while the phase tuple ticked
+independently at `sub2+13..14`). In 120-byte frames the single-block offsets
+carry the **settings** (`[14]` dryness, `[15]` mode, `[18]` course, `[23]`
+remaining — one tick behind `sub2+10`), and the **phase** lives only in
+`sub2`. There is no collision; a dryness/mode decoder reads `[14]/[15]` from
+any 120-byte frame. ⚠ Open detail: 69-byte DisplayOn frames carry zeros at
+`[14]/[15]` — settings are NOT in single-block frames; the old "(05,03) Idle
+tuple" sightings were settings misread as phase. Consequence of
+TR-as-duration: captured at cycle start, it provides the total-time field
+for a % progress sensor. TimeDry sub-scroll: cloud `timeDry` 30/40/50… with
+TR tracking 20–180 min.
 
 **Running with TR = 0** is the post-cycle anti-wrinkle tumble — but do not
 rely on this alone; one live tumble packet carried **TR = 1** and defeated a
@@ -250,10 +254,10 @@ standby     st=0b                   → Off
 4. Post-cycle tuple vocabulary (`(04,00)`, `(03,01)`, …) — intentionally
    unmapped; mapping them is unnecessary if the unknown-tuple rule is
    followed.
-5. How the `[14]/[15]` settings fields coexist with the phase tuple at the
-   same offsets during a running cycle — the §2.2 findings are from
-   selection frames; in-cycle frames need re-examination before reworking
-   the sensors.
+5. ~~`[14]/[15]` vs phase coexistence~~ **RESOLVED 2026-06-12**: in 120-byte
+   frames the settings live at single-block offsets and the phase only in
+   sub2 — confirmed across a full cycle; no collision (§2.2). The
+   dryness/mode sensor rework is unblocked.
 6. ~~Confirm the door state byte~~ **RESOLVED 2026-06-12**: confirmed
    mid-cycle with corrected polarity (`0x01`=open) — see §5.
 
