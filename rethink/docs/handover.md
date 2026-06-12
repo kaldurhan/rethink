@@ -114,20 +114,18 @@ sessions — a door-open or panel touch forces the reconnect.
    shifted two positions (`0x06`=1000, not 400; `0x0c`=drain-only, not 1200).
    Spec §3.4 corrected; unknown codes now keep the last value instead of
    publishing 0.
-3. **Stage events still come from the `0x53` heuristic** (ramp + 90 s
-   tumble-silence gate) while `cycle_phase` already derives Rinsing/Spinning
-   from activity codes `0x0c`/`0x0e`, which fire **~85 s earlier** (spec §4.3).
-   Candidate simplification: dispatch `rinsePhase`/`spinPhase` from activity
-   codes and drop the 0x53 path; stage and cycle_phase can currently disagree
-   for ~1.5 min.
-4. **No explicit End-packet sub-block guard.** Spec §6.4 says End packets carry
-   no valid sub-block; the code relies on the locator failing rather than
-   skipping decode when `st == 0x04` (the dryer enforces the equivalent rule).
+3. ~~Stage from 0x53 heuristic~~ **SIMPLIFIED 2026-06-12** (pending release):
+   rinse/spin stage events now come from activity codes (0x0c/0x27/0x0e),
+   firing ~85 s earlier; the 0x53 intercept, lastTumbleTime gate and
+   spinRampsSeen counter are deleted. Stage and cycle_phase can no longer
+   disagree.
+4. ~~End-packet sub-block guard~~ **ADDED 2026-06-12** (pending release):
+   st=0x04 now skips sub-block decode explicitly (spec §6.4), dryer parity.
 5. ~~Pause-code shape audit~~ **CLOSED 2026-06-12**: a real door-pause delivered
    0x0c in a new shape (`[12]=0x4d`) — pause code is shape-independent on the
    washer, ~23 s latency, never false (spec §4.2).
-6. **`sub[15]` (initial/total time) unread** — combined with `0x8a` elapsed
-   time this gives a % progress sensor. Pure code, no capture needed.
+6. ~~Washer initial_time~~ **IMPLEMENTED 2026-06-12** (pending release):
+   remaining captured at the cycle-start edge (dryer parity) → % progress in HA; sub[15] decode unnecessary.
 7. **Activity labels `0x03`/`0x26`/`0x02`** (Detecting/Filling/pre-wash) are
    best-guess — confirm on a programme with a weigh step (Bomull/Eco).
    'Detecting' did **not** appear at a Turbowash 39 start.
@@ -150,8 +148,8 @@ sessions — a door-open or panel touch forces the reconnect.
     tuples (keeps last, logs once; End/AntiCrease show Finished).
 12. **`ST=0x03` (Cooldown) dispatches `ended`, not `coolPhase`**
     (`RHX7009TWS.ts:259`). Benign in all captures (only seen at end-of-cycle),
-    but the intent is unpinned — a mid-cycle Cooldown-ST packet would latch Done
-    early. Add a comment or test pinning why.
+    PINNED 2026-06-12 with comment + test: status-class ST=0x03 is
+    end-equivalent (all mid-cycle 0x03 is info-class); a future counter-example forces a conscious revisit.
 13. ~~Total-time field~~ **IMPLEMENTED 2026-06-12** (pending release): new
     `initial_time` sensor — TR captured at the cycle-start edge (first
     positively identified active frame, where TR still equals the programme

@@ -294,8 +294,10 @@ silent for 15+ min there). [confirmed]
 This packet is useful as a _secondary_ signal for rinse/spin detection
 (first ramp after wash = rinse began; ramp after >90 s of tumble-packet
 silence = final spin). However, the activity codes (§3.3) flag Spinning
-**~85 s earlier** than this heuristic — a new implementation should derive
-phases purely from activity codes and may not need `0x53` at all.
+**~85 s earlier** than this heuristic — **the reference decoder dropped
+`0x53` entirely (2026-06-12)** and derives stage transitions purely from
+activity codes (`0x0c`/`0x27` → rinse, `0x0e` → spin). The frame remains
+interesting only for the undecoded motor-speed data at `inner[25+]` (§10).
 
 ## 5. Cycle timeline (live-validated example)
 
@@ -372,18 +374,19 @@ with a real course byte and garbage elsewhere. Two live incidents:
 
 What this decoder publishes, all live-validated:
 
-| entity                                                                 | source                              |
-| ---------------------------------------------------------------------- | ----------------------------------- |
-| run state (Standby/Running/Paused/End/AntiCrease)                      | `inner[10]` + §6 rules              |
-| course/programme                                                       | `sub[4]`                            |
-| cycle phase (Idle/Detecting/Filling/Washing/Rinsing/Spinning/Finished) | `sub[20]`                           |
-| remaining time (min)                                                   | `sub[13..14]` (gated per §6)        |
-| temperature setting                                                    | `sub[1]` when display tuple settled |
-| spin speed (rpm)                                                       | `sub[3]`                            |
-| cycle energy (Wh)                                                      | `10 08` block                       |
-| elapsed / phase-remaining / water temp                                 | `0x8a` snapshot                     |
-| door (open/closed)                                                     | info-class door event, §4.2         |
-| derived "stage" with exactly-once Done                                 | explicit FSM, see `stage_fsm.ts`    |
+| entity                                                                 | source                                 |
+| ---------------------------------------------------------------------- | -------------------------------------- |
+| run state (Standby/Running/Paused/End/AntiCrease)                      | `inner[10]` + §6 rules                 |
+| course/programme                                                       | `sub[4]`                               |
+| cycle phase (Idle/Detecting/Filling/Washing/Rinsing/Spinning/Finished) | `sub[20]`                              |
+| remaining time (min)                                                   | `sub[13..14]` (gated per §6)           |
+| programme duration (min → % progress)                                  | remaining time at the cycle-start edge |
+| temperature setting                                                    | `sub[1]` when display tuple settled    |
+| spin speed (rpm)                                                       | `sub[3]`                               |
+| cycle energy (Wh)                                                      | `10 08` block                          |
+| elapsed / phase-remaining / water temp                                 | `0x8a` snapshot                        |
+| door (open/closed)                                                     | info-class door event, §4.2            |
+| derived "stage" with exactly-once Done                                 | explicit FSM, see `stage_fsm.ts`       |
 
 ## 10. Known but undecoded packet types
 

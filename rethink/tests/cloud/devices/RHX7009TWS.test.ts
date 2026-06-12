@@ -298,6 +298,19 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.door, 'closed')
     })
 
+    test('status-class ST=0x03 (Cooldown-done) publishes Cooldown and latches Done — end-equivalent by design', () => {
+        // Synthetic short status frame: inner[8]=0x01 (status class), ST=0x03.
+        // Every mid-cycle ST=0x03 ever captured is info-class (filtered before
+        // this path); a status-class one means the cycle is over. Pinned so a
+        // future mid-cycle counter-example forces a conscious revisit.
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', buf('aa10300a00450001010001000300 00bb'.replace(/ /g, '')))
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Cooldown')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Done')
+    })
+
     // Real captured keepalives: e8 = asleep, e9 = session active.
     const KEEPALIVE_ASLEEP = buf('aa0730e80a86bb')
     const KEEPALIVE_SESSION = buf('aa0730e90a81bb')

@@ -719,31 +719,65 @@ describe(MODEL_ID, () => {
         'aaff200a0053001a83000201030018120e01021200dd00f50c00360000000000000000000000000001050025564344574c325145554b0000000000000000000000000102c0220b8b010700000000000000000000c500bb',
     )
 
-    test('0x53 final-spin ramp drives stage only — cycle_phase untouched', () => {
-        const { ha, thinq, dev } = makeDevice()
-        // lastTumbleTime=0 by default → >90s since last tumble → spinPhase fires.
-        assert.equal(dev.lastTumbleTime, 0)
+    test('0x53 motor ramp is inert — stage now comes from activity codes', () => {
+        const { ha, thinq } = makeDevice()
         thinq.emit('data', MOTOR_RAMP_53)
-        // cycle_phase comes from the 0x76 activity codes, not the ramp packet.
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, undefined)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.cycle_phase, undefined)
+        assert.equal(p.stage, undefined)
+        assert.equal(p.run_state, undefined)
     })
 
-    test('0x53 is suppressed when 0x76 was recent (<90 s)', () => {
-        const { ha, thinq, dev } = makeDevice()
-        // Simulate a recent 0x76 sub-block decode by setting lastTumbleTime to now.
-        dev.lastTumbleTime = Date.now()
-        thinq.emit('data', MOTOR_RAMP_53)
-        // cycle_phase must remain unpublished (not overridden by 0x53 SpinRamp).
-        assert.equal(ha.devices[DEVICE_ID].properties.cycle_phase, undefined)
-    })
-
-    test('0x53 does not affect run_state or other sensors', () => {
+    test('0x53 mid-cycle does not disturb stage or sensors', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', TURBOWASH_RUNNING_1MIN)
         const runState = ha.devices[DEVICE_ID].properties.run_state
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
         thinq.emit('data', MOTOR_RAMP_53)
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, runState)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
         assert.equal(ha.devices[DEVICE_ID].properties.elapsed_time, undefined)
+    })
+
+    test('activity codes drive stage: 0b→Washing, 0c→Rinsing, 0e→Spinning (no 0x53 needed)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x50, 0x00, [0x0b, 0x26]))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x30, 0x00, [0x0c, 0x0b]))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Rinsing')
+        // Inter-rinse drain+spin (0x27) keeps stage at Rinsing.
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x13, 0x00, [0x27, 0x0c]))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Rinsing')
+        thinq.emit('data', synthFrame(0x00, 0x00, 0x08, 0x2b, 0x09, 0x00, [0x0e, 0x0c]))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Spinning')
+    })
+
+    test('initial_time captured on the first active frame only (cycle-start edge)', () => {
+        const { ha, thinq } = makeDevice()
+        // Selection frame (passive act 0x01) must not set initial_time.
+        thinq.emit('data', synthFrame(0x03, 0x10, 0x08, 0x2b, 0x6b, 0x00, [0x01, 0x00]))
+        assert.equal(ha.devices[DEVICE_ID].properties.initial_time, undefined)
+        // First active frame: remaining 107 = programme duration.
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x6b, 0x00, [0x0b, 0x01]))
+        assert.equal(ha.devices[DEVICE_ID].properties.initial_time, 107)
+        // Later frames count down without touching initial_time.
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x64, 0x00, [0x0b, 0x26]))
+        assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 100)
+        assert.equal(ha.devices[DEVICE_ID].properties.initial_time, 107)
+    })
+
+    test('End packets never decode a sub-block even if one looks valid (spec §6.4)', () => {
+        const { ha, thinq } = makeDevice()
+        // Synthetic End frame carrying a plausible sub-block with a different course.
+        const endWithSub = synthFrame(0x00, 0x10, 0x08, 0x4b, 0x10, 0x00, [0x0b, 0x26])
+        endWithSub[12] = 0x04 // inner[10] = ST=End
+        thinq.emit('data', endWithSub)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.run_state, 'End')
+        assert.equal(p.remaining_time, 0)
+        // Course/phase from the embedded block must NOT publish.
+        assert.equal(p.course, undefined)
+        assert.equal(p.cycle_phase, undefined)
     })
 
     // Real door events captured live 2026-06-12 10:20 (idle door test, seven

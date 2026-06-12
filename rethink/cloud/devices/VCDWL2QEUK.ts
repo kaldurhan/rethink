@@ -110,11 +110,6 @@ const ACTIVITY_VCDWL: Record<number, string> = {
     0x10: 'Finished',
 }
 
-// Activity codes during which the drum tumbles — the only ones that may
-// refresh lastTumbleTime (the 0x53 final-spin gate depends on tumble
-// silence; spin packets must not reset it).
-const TUMBLE_ACTIVITY = new Set([0x03, 0x26, 0x02, 0x0b, 0x0c])
-
 // Passive blocks: drum not actively cycling. 0x01 = programme selection /
 // temp scroll, 0x10 = post-cycle anti-wrinkle tumble, 0x00 = post-cycle
 // idle. While ST=0xec these must not claim Running or start the stage
@@ -179,15 +174,6 @@ function findStatusSubBlock(inner: Buffer): number {
 }
 
 export default class Device extends AABBDevice {
-    // Timestamp of the last tumble-class 0x76 sub-block decode (see
-    // TUMBLE_ACTIVITY). Gates the 0x53 final-spin heuristic: during active
-    // tumble, 0x76 fires every ~60 s so this stays fresh; during the final
-    // drain+spin no tumble packet arrives for 15+ min, so a 0x53 ramp after
-    // >90 s of silence dispatches the stage spinPhase event.
-    lastTumbleTime = 0
-    // Count of intermediate spin-ramp events seen in the current cycle.
-    // 0 = still in wash phase; ≥1 = rinse phase has begun.
-    spinRampsSeen = 0
     // Last unmapped course/phase codes already logged — packets repeat every few
     // seconds, so without this gate an unknown code floods the add-on log.
     private loggedUnknownCourse = -1
@@ -255,6 +241,14 @@ export default class Device extends AABBDevice {
                     icon: 'mdi:timer-outline',
                     unit_of_measurement: 'min',
                     state_class: 'measurement',
+                },
+                initial_time: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-initial_time',
+                    state_topic: '$this/initial_time',
+                    name: 'Programme duration',
+                    icon: 'mdi:timer-sand',
+                    unit_of_measurement: 'min',
                 },
                 course_spend_power: {
                     platform: 'sensor',
@@ -350,31 +344,11 @@ export default class Device extends AABBDevice {
             }
             return
         }
-        // 83-byte frame (0x53): motor-controller ramp. inner[12]=0x18 (motor
-        // active), inner[13]=speed step 0x12..0x1f. Fires concurrently with
-        // status packets during tumble AND exclusively during the final
-        // drain+spin (status tumble absent for 15+ min). The >90 s
-        // tumble-silence gate distinguishes the final spin (stage spinPhase)
-        // from intermediate ramps (first one = rinse began). cycle_phase
-        // itself is published from the activity codes in the status path —
-        // this packet only drives stage events.
-        if (frameLen === 0x53) {
-            const isActiveSpin = inner.length >= 14 && inner[12] === 0x18 && inner[13] >= 0x12 && inner[13] <= 0x1f
-            if (isActiveSpin) {
-                const isFinalSpin = Date.now() - this.lastTumbleTime > 90000
-                if (isFinalSpin) {
-                    this.stageFsm!.dispatch('spinPhase')
-                } else {
-                    // Intermediate spin ramp during wash/rinse tumble
-                    this.spinRampsSeen++
-                    if (this.spinRampsSeen === 1) {
-                        // First spin ramp marks end of wash — rinse phase has begun
-                        this.stageFsm!.dispatch('rinsePhase')
-                    }
-                }
-            }
-            return
-        }
+        // 83-byte motor-controller ramp frames (0x53, info-class) used to
+        // drive stage rinse/spin via a 90 s tumble-silence heuristic. The
+        // activity codes flag the same transitions ~85 s earlier (spec §4.3),
+        // so stage events now come from sub[20] in the status path and these
+        // frames fall through to the info-class chaff below.
 
         // Door events arrive as 65-byte info-class frames: shape
         // inner[12]=0x06, event code inner[13]=0x10 (the same code the dryer
@@ -429,6 +403,11 @@ export default class Device extends AABBDevice {
         // it froze remaining_time/run_state through every spin.)
         const isPassiveBlock = st === 0xec && sub !== null && PASSIVE_ACTIVITY.has(sub[20])
 
+        // Cycle-start edge marker for the initial_time capture below: stage
+        // is still Off/Done on the FIRST active frame, where remaining time
+        // still equals the programme duration.
+        const wasIdle = this.stageFsm!.stage === 'Off' || this.stageFsm!.stage === 'Done'
+
         if (st !== 0xeb && !isPassiveBlock) {
             this.publishProperty('run_state', stateLabel)
             // A running drum physically implies a closed door. Closing the
@@ -450,12 +429,12 @@ export default class Device extends AABBDevice {
 
         if (st === 0x04 || st === 0xe2) {
             this.publishProperty('remaining_time', 0)
-            this.spinRampsSeen = 0
         }
 
-        if (st === 0x0b) {
-            this.spinRampsSeen = 0
-        }
+        // End packets carry no valid status sub-block (spec §6.4) — never
+        // decode course/phase/remaining from them. The locator usually fails
+        // on them anyway; this guard makes the rule explicit.
+        if (st === 0x04) return
 
         if (!sub) return
 
@@ -496,10 +475,15 @@ export default class Device extends AABBDevice {
                 this.loggedUnknownActivity = sub[20]
             }
         }
-        // Only tumble-class activity refreshes the tumble timestamp — the
-        // 0x53 final-spin gate ("no 0x76 tumble for >90 s") depends on spin
-        // packets NOT resetting it.
-        if (TUMBLE_ACTIVITY.has(sub[20])) this.lastTumbleTime = Date.now()
+
+        // Stage rinse/spin transitions come straight from the activity codes
+        // (they flag the transitions ~85 s before the old 0x53 ramp
+        // heuristic, spec §4.3). 0x0c rinse, 0x27 inter-rinse drain+spin
+        // (still Rinsing), 0x0e drain + final spin.
+        if (st === 0xec && !isPassiveBlock) {
+            if (sub[20] === 0x0c || sub[20] === 0x27) this.stageFsm!.dispatch('rinsePhase')
+            else if (sub[20] === 0x0e) this.stageFsm!.dispatch('spinPhase')
+        }
 
         // Unknown spin bytes (e.g. transient 0x27 during drain) keep the last
         // published value — they are not wheel settings.
@@ -535,6 +519,11 @@ export default class Device extends AABBDevice {
             // programme duration.
             const remaining = sub[13] | (sub[14] << 8)
             this.publishProperty('remaining_time', remaining)
+            // Cycle-start edge: the first active frame's remaining time still
+            // equals the programme duration (dryer parity, spec §2.2 there).
+            if (wasIdle && !isPassiveBlock && remaining > 0) {
+                this.publishProperty('initial_time', remaining)
+            }
         }
 
         // Extract cycle energy (Wh) from the 10 08 block present in Running packets.

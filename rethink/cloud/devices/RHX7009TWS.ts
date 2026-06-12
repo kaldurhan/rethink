@@ -302,6 +302,11 @@ export default class Device extends AABBDevice {
 
         // Short Running packets carry no phase but only occur mid-cycle.
         if (st === 0xec && inner.length < 24) this.stageFsm!.dispatch('cycleActive')
+        // ST=0x03 in a STATUS-class frame is the machine's own Cooldown-done
+        // state — observed only at end-of-cycle (every mid-cycle ST=0x03 is
+        // info-class and filtered above), so it is treated as end-equivalent
+        // and latches Done. If one ever appeared mid-cycle it would latch
+        // Done early — no capture has shown that; pinned by test.
         if (st === 0x04 || st === 0xe2 || st === 0x03) this.stageFsm!.dispatch('ended')
         if (st === 0x0b) this.stageFsm!.dispatch('standby')
 
