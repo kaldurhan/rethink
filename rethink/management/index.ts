@@ -11,6 +11,7 @@ import { Request, Response } from 'express'
 import { Device as T1Device } from '@/cloud/thinq1/device'
 import { Device as T2Device } from '@/cloud/thinq2/device'
 import { connect } from '@/util/lgcloud/monitor'
+import { captureCloud, captureEnabled } from '@/util/capture'
 import { loadState, saveState } from '@/util/lgcloud/state'
 import { Client, signInUrl } from '@/bridge/thinqApi'
 import * as OAuth2 from '@/bridge/oauth2'
@@ -266,6 +267,9 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
     const CERT_MIN_INTERVAL = 65_000 // LG rate-limits cert generation; ~60 s observed
 
     function broadcastCloud(message: object) {
+        // capture mode records the cloud feed too (the correlation reference
+        // research depends on; cloudStatus chatter is skipped)
+        if (!('cloudStatus' in message)) captureCloud(message)
         const str = JSON.stringify(message)
         cloudSubscribers.forEach((sub) => {
             try {
@@ -321,6 +325,9 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
                     if (m === '_close') {
                         broadcastCloud({ cloudStatus: 'disconnected' })
                         cloud = { status: 'idle' }
+                        // capture mode keeps the feed alive without browser
+                        // subscribers — research correlation needs continuity
+                        if (captureEnabled()) setTimeout(ensureCloudConnected, 30_000)
                         return
                     }
                     if (m === '_offline') return
@@ -332,8 +339,13 @@ export function app(ha: HA_bridge, manager: DeviceManager, bridge: Bridge | unde
             log('CLOUD', `connection failed: ${err}`)
             broadcastCloud({ cloudStatus: `error: ${err}` })
             cloud = { status: 'idle' }
+            if (captureEnabled()) setTimeout(ensureCloudConnected, 60_000)
         }
     }
+
+    // Capture mode records the cloud feed continuously — start it at boot
+    // instead of waiting for the first browser subscriber.
+    if (captureEnabled()) ensureCloudConnected()
 
     app.ws('/lgcloud', (req, res, next) => {
         res.accept().then((ws) => {

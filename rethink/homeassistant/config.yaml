@@ -37,6 +37,7 @@ options:
     https_port: 4433
     listen_443: true
     management_port: 44401
+    capture_raw: false
 
 schema:
     hostname: str
@@ -48,6 +49,7 @@ schema:
     https_port: int
     listen_443: bool
     management_port: int
+    capture_raw: bool?
     setup_ip: str?
     wifi_ssid: str?
     wifi_password: password?

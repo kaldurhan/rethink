@@ -2,13 +2,26 @@
 import HADevice from './base'
 import { Device as Thinq2Device } from '../thinq2/device'
 import { type Connection } from '../homeassistant'
-import { StageFSM, type TransitionTable } from './stage_fsm'
+import { StageFSM, type Stage, type TransitionTable } from './stage_fsm'
 import { loadStageState, saveStageState } from './stage_store'
+import { captureDevice } from '@/util/capture'
+import log from '@/util/logging'
 
 // Consecutive asleep-keepalives required before forcing Standby (~20 s at
 // the 2 s keepalive cadence). One transient 0xe8 was observed mid-session
 // (2026-06-12 11:05:18) — the streak absorbs such blips.
 const KEEPALIVE_ASLEEP_STREAK = 10
+
+// A healthy machine streams keepalives every ~2 s at ALL times (asleep
+// included). Silence beyond this means the TLS session is half-open — the
+// failure mode that left stale values in HA for hours on 2026-06-12 while
+// the broker still reported the session "online".
+const SILENCE_OFFLINE_MS = 150_000
+
+// Stages that mean a cycle is physically underway (used for the cycle
+// summary timer; Paused intentionally excluded so pauses count into the
+// total duration).
+const ACTIVE_STAGES = new Set<Stage>(['Washing', 'Rinsing', 'Spinning', 'Heating', 'Drying', 'Cooling'])
 
 export default abstract class AABBDevice extends HADevice {
     publishCache: Record<string, string | number> = {}
@@ -43,8 +56,13 @@ export default abstract class AABBDevice extends HADevice {
         }
     }
 
+    // Timestamp of the first active-stage entry of the current cycle; null
+    // outside cycles (and after a mid-cycle add-on restart, where the start
+    // time is unknown — the summary is skipped for that cycle).
+    private cycleStartedAt: number | null = null
+
     // Call from subclass constructor. Restores persisted stage, publishes it on
-    // start(), and centralizes the Done→Off fallback timer.
+    // start(), and centralizes the Done→Off fallback timer + cycle summary.
     protected initStageFSM(table: TransitionTable) {
         const persisted = loadStageState()[this.thinq.id]
         const initial = persisted?.stage ?? 'Off'
@@ -55,10 +73,30 @@ export default abstract class AABBDevice extends HADevice {
                 since: Date.now(),
                 lastDoneAt: stage === 'Done' ? Date.now() : (loadStageState()[this.thinq.id]?.lastDoneAt ?? null),
             })
-            if (stage === 'Done') this.scheduleOff()
-            else this.cancelOffTimer()
+            if (ACTIVE_STAGES.has(stage) && this.cycleStartedAt === null) {
+                this.cycleStartedAt = Date.now()
+            }
+            if (stage === 'Done') {
+                // End-of-cycle summary: duration from the cycle-start edge,
+                // energy from the device's own cycle counter when it has one.
+                if (this.cycleStartedAt !== null) {
+                    this.publishProperty('last_cycle_duration', Math.round((Date.now() - this.cycleStartedAt) / 60000))
+                }
+                const energy = this.publishCache['course_spend_power']
+                if (energy !== undefined) this.publishProperty('last_cycle_energy', energy)
+                this.cycleStartedAt = null
+                this.scheduleOff()
+            } else {
+                if (stage === 'Off') this.cycleStartedAt = null
+                this.cancelOffTimer()
+            }
         })
     }
+
+    // Frame-silence availability watchdog (see SILENCE_OFFLINE_MS).
+    private lastFrameAt = Date.now()
+    private silenceOffline = false
+    private silenceTimer: ReturnType<typeof setInterval>
 
     constructor(
         HA: Connection,
@@ -66,6 +104,23 @@ export default abstract class AABBDevice extends HADevice {
     ) {
         super(HA, thinq.id)
         thinq.on('data', (data) => this.processData(data))
+        this.silenceTimer = setInterval(() => this.checkSilence(), 60_000)
+        this.silenceTimer.unref()
+        thinq.on('close', () => clearInterval(this.silenceTimer))
+    }
+
+    // Half-open TLS sessions deliver no frames but never fire 'close' — mark
+    // the device unavailable so HA shows the truth instead of stale values.
+    // Exposed (with injectable clock) for tests.
+    checkSilence(now = Date.now()) {
+        if (!this.silenceOffline && now - this.lastFrameAt > SILENCE_OFFLINE_MS) {
+            this.silenceOffline = true
+            log(
+                'status',
+                `${this.id}: no frames for ${Math.round((now - this.lastFrameAt) / 1000)} s — marking unavailable`,
+            )
+            this.HA.publishProperty(this.id, 'availability', 'offline')
+        }
     }
 
     // sends a packet of the format:
@@ -79,6 +134,13 @@ export default abstract class AABBDevice extends HADevice {
     }
 
     processData(buf: Buffer) {
+        captureDevice(this.thinq.id, buf)
+        this.lastFrameAt = Date.now()
+        if (this.silenceOffline) {
+            this.silenceOffline = false
+            log('status', `${this.id}: frames resumed — marking available`)
+            this.HA.publishProperty(this.id, 'availability', 'online')
+        }
         if (buf.length >= 4 && buf[0] == 0xaa && buf[buf.length - 1] == 0xbb) {
             this.processAABB(buf.subarray(2, buf.length - 2))
         }

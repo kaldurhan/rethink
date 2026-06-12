@@ -15,6 +15,7 @@ export type Config = {
         storage_path: string
     }
     log?: string[]
+    capture_raw?: boolean
 }
 
 export type HAConfig = {

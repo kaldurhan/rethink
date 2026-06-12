@@ -20,6 +20,7 @@ if [ -f /data/options.json ] && [ -n "$SUPERVISOR_TOKEN" ]; then
     SETUP_IP=$(jq -r '.setup_ip // ""' "$OPTIONS")
     WIFI_SSID=$(jq -r '.wifi_ssid // ""' "$OPTIONS")
     WIFI_PASSWORD=$(jq -r '.wifi_password // ""' "$OPTIONS")
+    CAPTURE_RAW=$(jq -r '.capture_raw // false' "$OPTIONS")
 
     cat > /data/config.json <<EOF
 {
@@ -43,6 +44,7 @@ if [ -f /data/options.json ] && [ -n "$SUPERVISOR_TOKEN" ]; then
   "bridge": {
     "storage_path": "./state"
   },
+  "capture_raw": ${CAPTURE_RAW},
   "log": ["status", "incoming", "HTTPS", "publish", "MGMT"]
 }
 EOF

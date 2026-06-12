@@ -880,6 +880,54 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
     })
 
+    test('frame silence >150 s marks the device unavailable; next frame restores it', () => {
+        const { ha, thinq, dev } = makeDevice()
+        thinq.emit('data', KEEPALIVE_SESSION)
+        // discovery published availability=online at construction
+        assert.equal(ha.devices[DEVICE_ID].availability, 'online')
+        dev.checkSilence(Date.now() + 200_000)
+        assert.equal(ha.devices[DEVICE_ID].availability, 'offline')
+        // any frame flips it back
+        thinq.emit('data', KEEPALIVE_SESSION)
+        assert.equal(ha.devices[DEVICE_ID].availability, 'online')
+    })
+
+    test('checkSilence within the window does nothing', () => {
+        const { ha, thinq, dev } = makeDevice()
+        thinq.emit('data', KEEPALIVE_SESSION)
+        dev.checkSilence(Date.now() + 60_000)
+        assert.equal(ha.devices[DEVICE_ID].availability, 'online')
+    })
+
+    test('Done publishes last_cycle_duration and last_cycle_energy', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN) // starts cycle; carries 10 08 energy block
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+        const energy =
+            ha.devices[DEVICE_ID].properties.cycle_energy ?? ha.devices[DEVICE_ID].properties.course_spend_power
+        thinq.emit('data', END_OF_CYCLE)
+        const p = ha.devices[DEVICE_ID].properties
+        assert.equal(p.stage, 'Done')
+        assert.equal(p.last_cycle_duration, 0, 'same-tick cycle rounds to 0 min')
+        assert.equal(p.last_cycle_energy, p.course_spend_power)
+        assert.ok(energy !== undefined || p.course_spend_power !== undefined)
+    })
+
+    test('unknown activity code publishes last_unknown diagnostic', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', synthFrame(0x00, 0x10, 0x08, 0x2b, 0x50, 0x00, [0x31, 0x0b]))
+        assert.equal(ha.devices[DEVICE_ID].properties.last_unknown, 'activity 0x31')
+    })
+
+    test('0x8a publishes the diagnostic water-temp series [32..35]', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', PERIODIC_8A)
+        const p = ha.devices[DEVICE_ID].properties
+        // fixture carries 2d at [31..35] → 45 °C across the series
+        assert.equal(p.water_temp_2, 0x2d)
+        assert.equal(p.water_temp_5, 0x2d)
+    })
+
     test('active Running block infers door=closed (close-from-sleep emits no event)', () => {
         const { ha, thinq } = makeDevice()
         // Door left 'open' from a sleep-time test, then the user silently

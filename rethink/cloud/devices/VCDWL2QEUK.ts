@@ -306,6 +306,49 @@ export default class Device extends AABBDevice {
                     device_class: 'enum',
                     options: ['Off', 'Paused', 'Washing', 'Rinsing', 'Spinning', 'Done'],
                 },
+                last_cycle_duration: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-last_cycle_duration',
+                    state_topic: '$this/last_cycle_duration',
+                    name: 'Last cycle duration',
+                    icon: 'mdi:history',
+                    unit_of_measurement: 'min',
+                },
+                last_cycle_energy: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-last_cycle_energy',
+                    state_topic: '$this/last_cycle_energy',
+                    name: 'Last cycle energy',
+                    icon: 'mdi:lightning-bolt-outline',
+                    unit_of_measurement: 'Wh',
+                    device_class: 'energy',
+                },
+                last_unknown: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-last_unknown',
+                    state_topic: '$this/last_unknown',
+                    name: 'Last unknown code',
+                    icon: 'mdi:help-rhombus-outline',
+                    entity_category: 'diagnostic',
+                },
+                // 0x8a carries five temperature sensor points at inner[31..35];
+                // [31] is the main water_temp, the rest are diagnostic.
+                ...Object.fromEntries(
+                    [2, 3, 4, 5].map((n) => [
+                        `water_temp_${n}`,
+                        {
+                            platform: 'sensor',
+                            unique_id: `$deviceid-water_temp_${n}`,
+                            state_topic: `$this/water_temp_${n}`,
+                            name: `Water temperature ${n}`,
+                            icon: 'mdi:thermometer-water',
+                            unit_of_measurement: '°C',
+                            state_class: 'measurement',
+                            device_class: 'temperature',
+                            entity_category: 'diagnostic',
+                        },
+                    ]),
+                ),
             },
         })
         this.initStageFSM(WASHER_TABLE)
@@ -341,6 +384,11 @@ export default class Device extends AABBDevice {
                 this.publishProperty('elapsed_time', inner[23])
                 this.publishProperty('phase_remaining_time', inner[25])
                 this.publishProperty('water_temp', inner[31])
+                // The snapshot carries five temperature points at [31..35];
+                // [32..35] publish as diagnostic sensors.
+                if (inner.length >= 36) {
+                    for (let n = 2; n <= 5; n++) this.publishProperty(`water_temp_${n}`, inner[30 + n])
+                }
             }
             return
         }
@@ -472,6 +520,7 @@ export default class Device extends AABBDevice {
                 this.publishProperty('cycle_phase', activity)
             } else if (sub[20] !== this.loggedUnknownActivity) {
                 log('status', this.id, `unknown activity code 0x${sub[20].toString(16).padStart(2, '0')}`)
+                this.publishProperty('last_unknown', `activity 0x${sub[20].toString(16).padStart(2, '0')}`)
                 this.loggedUnknownActivity = sub[20]
             }
         }
@@ -493,6 +542,7 @@ export default class Device extends AABBDevice {
             this.publishProperty('spin', spinRpm)
         } else if (sp !== this.loggedUnknownSpin) {
             log('status', this.id, `unknown spin byte 0x${sp.toString(16).padStart(2, '0')}`)
+            this.publishProperty('last_unknown', `spin 0x${sp.toString(16).padStart(2, '0')}`)
             this.loggedUnknownSpin = sp
         }
 
@@ -500,6 +550,7 @@ export default class Device extends AABBDevice {
         const courseLabel = COURSES_VCDWL[cs]
         if (courseLabel === undefined && cs !== this.loggedUnknownCourse) {
             log('status', this.id, `unknown course byte 0x${cs.toString(16).padStart(2, '0')}`)
+            this.publishProperty('last_unknown', `course 0x${cs.toString(16).padStart(2, '0')}`)
             this.loggedUnknownCourse = cs
         }
         // 'unknown' is in the enum options list; a dynamic label would be

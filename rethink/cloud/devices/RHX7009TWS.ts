@@ -162,6 +162,22 @@ export default class Device extends AABBDevice {
                     payload_on: 'open',
                     payload_off: 'closed',
                 },
+                last_cycle_duration: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-last-cycle-duration',
+                    state_topic: '$this/last_cycle_duration',
+                    name: 'Last cycle duration',
+                    icon: 'mdi:history',
+                    unit_of_measurement: 'min',
+                },
+                last_unknown: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-last-unknown',
+                    state_topic: '$this/last_unknown',
+                    name: 'Last unknown code',
+                    icon: 'mdi:help-rhombus-outline',
+                    entity_category: 'diagnostic',
+                },
             },
         })
         this.initStageFSM(DRYER_TABLE)
@@ -332,6 +348,7 @@ export default class Device extends AABBDevice {
             this.publishProperty('phase', phase)
         } else if (((phA << 8) | phB) !== this.loggedUnknownTuple) {
             log('status', this.id, `unknown phase tuple (0x${phA.toString(16)}, 0x${phB.toString(16)})`)
+            this.publishProperty('last_unknown', `phase (0x${phA.toString(16)}, 0x${phB.toString(16)})`)
             this.loggedUnknownTuple = (phA << 8) | phB
         }
 

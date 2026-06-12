@@ -102,6 +102,26 @@ live-validated except where noted:
   all correct). "Pending release" markers in the gap list below are now
   released.
 
+**1.0.70 — integration hardening (2026-06-13):**
+
+- **Frame-silence availability watchdog**: no frames for 150 s → device
+  marked unavailable in HA (half-open TLS sessions deliver no 'close';
+  this is the failure that showed stale values for hours on 2026-06-12).
+  Next frame restores availability automatically.
+- **Capture mode** (`capture_raw: true` add-on option): per-device + cloud
+  ndjson under `/data/captures/`, restart-proof; also auto-starts and
+  auto-reconnects the LG cloud feed so correlation references are always
+  recorded. This replaces the fragile debug-WS capture scripts.
+- **End-of-cycle summary**: `last_cycle_duration` (both machines) and
+  `last_cycle_energy` (washer) publish at each Done edge.
+- **Diagnostics**: `last_unknown` sensor per machine surfaces unknown
+  activity/course/spin/phase codes into HA history (was log-only); washer
+  water-temp series `[32..35]` published as diagnostic sensors.
+- **HA side** (`ha-automations/`): `laundry_progress_package.yaml`
+  (% progress template sensors → configuration/packages) and
+  `laundry_extras.yaml` (mold-prevention reminder: washed but door closed
+  2 h after Done → notify; import as automation).
+
 Operational notes from the day: after add-on **updates**, restart once more;
 verify the debug WS feeds (device AND cloud) are alive before relying on a
 capture — both go stale after restarts (the add-on log is the reliable tap);

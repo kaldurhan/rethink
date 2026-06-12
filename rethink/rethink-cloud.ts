@@ -18,6 +18,7 @@ import { Config, CA } from './util/config'
 import * as Management from './management'
 
 import log, { setFilter as setLogFilter } from './util/logging'
+import { initCapture } from './util/capture'
 import { DeviceManager } from './cloud/devmgr'
 import { Bridge } from './bridge'
 import { JSONStorage } from './bridge/state'
@@ -33,6 +34,10 @@ config.ca_cert_file = resolve(configDir, config.ca_cert_file)
 if (config.bridge) config.bridge.storage_path = resolve(configDir, config.bridge.storage_path)
 
 if (!config.log) config.log = ['status', 'incoming', 'HTTPS']
+
+// Raw-traffic capture for protocol research: per-device + cloud ndjson under
+// the config dir (= /data in add-on mode), restart-proof unlike the debug WS.
+initCapture(config.capture_raw ? resolve(configDir, 'captures') : null)
 
 const enabled = Object.fromEntries(config.log.map((key) => [key, true]))
 setLogFilter((topic) => {

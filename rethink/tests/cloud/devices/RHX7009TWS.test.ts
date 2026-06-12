@@ -481,7 +481,7 @@ describe(MODEL_ID, () => {
 
     test('knob-scroll selections decode the corrected course bytes', () => {
         const { ha, thinq } = makeDevice()
-        const expect = [
+        const expect: [Buffer, string][] = [
             [SCROLL_AI, 'AI Dry'],
             [SCROLL_ECO, 'Eco'],
             [SCROLL_EASYCARE, 'Easy Care'],
