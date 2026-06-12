@@ -136,6 +136,15 @@ export default class Device extends AABBDevice {
                     device_class: 'enum',
                     options: ['Off', 'Paused', 'Heating', 'Drying', 'Cooling', 'Done'],
                 },
+                door: {
+                    platform: 'binary_sensor',
+                    unique_id: '$deviceid-door',
+                    state_topic: '$this/door',
+                    name: 'Door',
+                    device_class: 'door',
+                    payload_on: 'open',
+                    payload_off: 'closed',
+                },
             },
         })
         this.initStageFSM(DRYER_TABLE)
@@ -209,7 +218,19 @@ export default class Device extends AABBDevice {
         if (isInfoClass) {
             const code = inner.length > 17 && inner[13] === inner[17] ? inner[13] : -1
             const isUserEventShape = inner[12] === 0x16
-            if (st === 0x03 && isUserEventShape && (code === 0x0c || code === 0x07)) {
+            // Door event (code 0x10): state at inner[31] — 0x01=open,
+            // 0x00=closed. Polarity confirmed mid-cycle 2026-06-12
+            // (pause→open→close→resume); the idle test's apparent inversion
+            // was a wake artifact — opening a SLEEPING dryer wakes it without
+            // a 0x10 event, so that session's first event was a close.
+            if (st === 0x03 && isUserEventShape && code === 0x10 && inner.length > 31) {
+                this.publishProperty('door', inner[31] === 0x01 ? 'open' : 'closed')
+                return
+            }
+            // Pause: code 0x0c only — confirmed for BOTH panel pause and a
+            // real mid-cycle door pause (2026-06-12). The provisional 0x07
+            // was the 0x29-shape progress counter misread; dropped.
+            if (st === 0x03 && isUserEventShape && code === 0x0c) {
                 this.publishProperty('run_state', 'Paused')
                 this.stageFsm!.dispatch('paused')
             }
@@ -280,7 +301,12 @@ export default class Device extends AABBDevice {
             // Heating/Drying packet starts the cycle moments later. With
             // unknown tuples gated above, only positively identified active
             // phases reach cycleActive.
-            if (phase !== 'Idle' && phase !== 'Startup') this.stageFsm!.dispatch('cycleActive')
+            if (phase !== 'Idle' && phase !== 'Startup') {
+                this.stageFsm!.dispatch('cycleActive')
+                // A positively identified active phase implies a closed door
+                // (washer parity: closing a sleeping machine's door is silent).
+                this.publishProperty('door', 'closed')
+            }
             if (phase === 'Heating') this.stageFsm!.dispatch('heatPhase')
             else if (phase === 'Drying') this.stageFsm!.dispatch('dryPhase')
             else if (phase === 'Cooldown' || phase === 'Finishing') this.stageFsm!.dispatch('coolPhase')

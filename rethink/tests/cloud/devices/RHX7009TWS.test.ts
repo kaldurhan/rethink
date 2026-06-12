@@ -259,6 +259,46 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
     })
 
+    // Real mid-cycle door pause, captured live 2026-06-12 13:31–13:32:
+    // pause (code 0x0c) → door open ([31]=0x01) → door close ([31]=0x00)
+    // → resume. The pause code for a DOOR pause is 0x0c — same as panel
+    // pause; the provisional 0x07 never appeared.
+    const MIDCYCLE_PAUSE_0C = buf(
+        'aaff300a005100bbdf0002010300160c1003050c01100634030603000e0038040000000504010500255344485f58375f373030380000000000000000000102c38a784806070000000000000000009fcebb',
+    )
+    const MIDCYCLE_DOOR_OPEN = buf(
+        'aaff300a005100bbe100020103001610100305100000063500000000000000000001000000010500255344485f58375f373030380000000000000000000102c58a7848060700000000000000000097eabb',
+    )
+    const MIDCYCLE_DOOR_CLOSE = buf(
+        'aaff300a005100bbe200020103001610100305100000063600000000000000000000000000010500255344485f58375f373030380000000000000000000102c78a78480607000000000000000000ffa5bb',
+    )
+
+    test('mid-cycle door pause (code 0x0c) → run_state=Paused, stage=Paused', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', MIDCYCLE_PAUSE_0C)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Paused')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Paused')
+    })
+
+    test('door event [31]=0x01 → door=open; [31]=0x00 → door=closed; run_state untouched', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', MIDCYCLE_DOOR_OPEN)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'open')
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
+        thinq.emit('data', MIDCYCLE_DOOR_CLOSE)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'closed')
+    })
+
+    test('active Drying frame infers door=closed (close-from-sleep is silent)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', MIDCYCLE_DOOR_OPEN)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'open')
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.door, 'closed')
+    })
+
     test('programme selection (ST=0xec, ambiguous Startup tuple) does NOT start the stage machine', () => {
         // The dryer broadcasts ST=0xec with phase tuple 0x0100 (Startup) while
         // a programme is merely selected on the panel — the same tuple a real

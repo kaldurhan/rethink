@@ -180,23 +180,24 @@ at `inner[17]`.
 | `0x69` (len 160), `0x75` (len 172) | routine     | misc codes, not user events                                              | [confirmed present, semantics unmapped] |
 
 **Pause detection:** only a code in the user-event shape (`inner[12] =
-0x16`) with value `0x0c` (or provisionally `0x07`) may publish Paused.
-Without the shape key, the routine counter's `0x07` value produced a
-1-second spurious Paused mid-cycle (door untouched, user-confirmed).
-[confirmed — live packet is a regression fixture]
+0x16`) with value **`0x0c`** may publish Paused. Confirmed for BOTH pause
+kinds: panel pause (2026-06-11) and a real mid-cycle door pause
+(2026-06-12: pause → door open → close → resume, all captured). The
+provisional `0x07` never appeared in a genuine pause — it was only ever the
+`0x29`-shape progress counter's first value, which without the shape key
+produced a 1-second spurious Paused mid-cycle (door untouched,
+user-confirmed). [confirmed — live packets are regression fixtures]
 
-`0x07` as "mid-cycle door-open pause" is **[best-guess]**: it remains in the
-pause set shape-gated, but no real mid-cycle door pause has been captured to
-confirm its actual code. An official implementation should capture one
-before relying on it.
-
-**Door state byte** [best-guess, 2026-06-12 idle door test]: the door event
+**Door state byte** [confirmed, two sessions]: the door event
 (`[12]=0x16`, code `[13]=0x10`, len 81) carries door state at `inner[31]` —
-`0x00` = open, `0x01` = closed. Alternated perfectly across four open/close
-pairs; an event counter increments at `inner[21]` (shared with other event
-types). Different offset than the washer's `[18]`, same event code. One more
-confirmation (e.g. the door-close before a cycle) would lift this to
-[confirmed] and enable a dryer door sensor.
+**`0x01` = open, `0x00` = closed** (mid-cycle sequence 2026-06-12 is
+unambiguous). ⚠ The idle test initially suggested the opposite polarity —
+a wake artifact: opening a _sleeping_ dryer wakes it **without** emitting a
+`0x10` door event (same asymmetry as the washer), so that session's first
+event was actually the first _close_. An event counter increments at
+`inner[21]` (shared across event types). Different state offset than the
+washer's `[18]`, same event code. Like the washer, close-from-sleep is
+silent — infer closed from positively identified active phases.
 
 ## 6. The two duplicate-Done traps (both hit live)
 
@@ -239,7 +240,8 @@ standby     st=0b                   → Off
 
 ## 8. Open questions
 
-1. Real capture of a mid-cycle door-open pause (confirm/replace `0x07`).
+1. ~~Mid-cycle door-open pause~~ **RESOLVED 2026-06-12**: door pause emits
+   `0x0c` (same as panel pause); `0x07` removed from the pause set (§5).
 2. ~~Real capture of drying-mode browsing~~ **RESOLVED 2026-06-12 with a
    twist**: the mode (and dryness) never were in TR — see §2.2. The
    `dryness_level`/`drying_mode` sensors need a rework to decode
@@ -252,18 +254,20 @@ standby     st=0b                   → Off
    same offsets during a running cycle — the §2.2 findings are from
    selection frames; in-cycle frames need re-examination before reworking
    the sensors.
-6. Confirm the door state byte `inner[31]` (§5) on a second occasion.
+6. ~~Confirm the door state byte~~ **RESOLVED 2026-06-12**: confirmed
+   mid-cycle with corrected polarity (`0x01`=open) — see §5.
 
 ## 9. Suggested entity model
 
-| entity                                                     | source                           |
-| ---------------------------------------------------------- | -------------------------------- |
-| run state (Standby/Running/Paused/Cooldown/AntiCrease/End) | ST + §5/§6 rules                 |
-| programme                                                  | CS (never from End packets)      |
-| phase (Idle/Heating/Drying/Cooldown/Finishing)             | phase tuple                      |
-| remaining time (min)                                       | TR while running                 |
-| dryness level / drying mode                                | TR while DisplayOn (§2.2)        |
-| derived "stage" with exactly-once Done                     | explicit FSM, see `stage_fsm.ts` |
+| entity                                                     | source                                          |
+| ---------------------------------------------------------- | ----------------------------------------------- |
+| run state (Standby/Running/Paused/Cooldown/AntiCrease/End) | ST + §5/§6 rules                                |
+| programme                                                  | CS (never from End packets)                     |
+| phase (Idle/Heating/Drying/Cooldown/Finishing)             | phase tuple                                     |
+| remaining time (min)                                       | TR while running                                |
+| dryness level / drying mode                                | TR while DisplayOn (§2.2)                       |
+| door (open/closed)                                         | door event `[31]` + active-phase inference (§5) |
+| derived "stage" with exactly-once Done                     | explicit FSM, see `stage_fsm.ts`                |
 
 ## 10. Packet-type census (full Mixed Fabrics cycle, 2026-06-06)
 

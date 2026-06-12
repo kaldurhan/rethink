@@ -112,8 +112,8 @@ remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures di
 9. **No energy sensor.** The washer publishes `course_spend_power`; the dryer's
    equivalent data (info-class shape `0x75`, len 172 — historically catalogued
    as packet type `0xb0`, 79×/cycle) is undecoded. See dryer spec §10.
-10. **`0x07` pause code unconfirmed** — shape-gated best-guess; needs a real
-    mid-cycle door-open pause capture (open the dryer door once mid-cycle).
+10. ~~`0x07` pause code~~ **CLOSED 2026-06-12**: real door pause emits 0x0c
+    (same as panel pause); 0x07 dropped. Dryer door sensor implemented (gap 13b).
 11. **`dryness_level` and `drying_mode` sensors decode the wrong bytes** —
     the 2026-06-12 panel scrolls showed both were reading programme
     _durations_ that co-varied with the settings (spin-map-class error). Real
@@ -128,9 +128,9 @@ remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures di
 13. **Total-time field found** (2026-06-12): TR during selection = programme
     duration (= cloud `initialTimeMinute`), spec §2.2. Remaining work:
     capture it at cycle start in the decoder → % progress sensor.
-    13b. **Dryer door sensor now possible**: door state at `inner[31]` of the
-    door event ([best-guess], spec §5) — needs one more confirmation, then
-    washer-parity `door` binary_sensor.
+    13b. ~~Dryer door sensor~~ **IMPLEMENTED 2026-06-12** (pending release): door
+    event `[31]` (0x01=open, polarity confirmed mid-cycle) + active-phase
+    closed-inference, washer parity (spec §5).
 
 ### Cross-cutting
 
