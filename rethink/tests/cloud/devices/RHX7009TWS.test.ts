@@ -291,6 +291,27 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.door, 'closed')
     })
 
+    // Real captured keepalives: e8 = asleep, e9 = session active.
+    const KEEPALIVE_ASLEEP = buf('aa0730e80a86bb')
+    const KEEPALIVE_SESSION = buf('aa0730e90a81bb')
+
+    test('10 consecutive asleep keepalives correct a stale state to Standby + stage Off', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        for (let i = 0; i < 10; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Off')
+    })
+
+    test('session keepalives do not publish and reset the asleep streak', () => {
+        const { ha, thinq } = makeDevice()
+        for (let i = 0; i < 9; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        thinq.emit('data', KEEPALIVE_SESSION)
+        for (let i = 0; i < 9; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
+    })
+
     test('active Drying frame infers door=closed (close-from-sleep is silent)', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', MIDCYCLE_DOOR_OPEN)

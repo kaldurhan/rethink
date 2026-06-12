@@ -158,6 +158,13 @@ export default class Device extends AABBDevice {
         // Frame-type guard
         if (inner[0] !== 0x30) return
 
+        // 7-byte keepalives (inner = [family, state, seq]) carry the session
+        // bit — see AABBDevice.trackKeepalive.
+        if (inner.length === 3) {
+            this.trackKeepalive(inner[1])
+            return
+        }
+
         // Too short to read ST at inner[10]
         if (inner.length < 11) return
 

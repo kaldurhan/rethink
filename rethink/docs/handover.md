@@ -139,7 +139,14 @@ remaining_time blip). Raw evidence: `validation-2026-06-1*-*` in the captures di
 15. **Load level / soil / error sensors have no known binary source** (cloud has
     `loadLevel`, `soilWash`, `error` — off-limits per the local-only policy).
     Hunting them needs paired captures: light vs heavy load, same course at
-    different soil settings.
+    different soil settings. (Error sub-finding 2026-06-12: dispenser
+    warnings are panel/cloud-only; a binary error needs a cycle-halting
+    fault.)
+16. ~~Stale post-cycle run_state after restart~~ **RESOLVED 2026-06-12**
+    (pending release): the keepalive session bit (`0xe9` active / `0xe8`
+    asleep — protocol README) now corrects stale End/AntiCrease: 10
+    consecutive asleep keepalives (~20 s) publish Standby and drive stage to
+    Off, on both machines.
 
 ## Experiment queue (captures that unblock gaps)
 

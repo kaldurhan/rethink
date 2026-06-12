@@ -322,6 +322,12 @@ export default class Device extends AABBDevice {
     }
 
     processAABB(inner: Buffer) {
+        // 7-byte keepalives (inner = [family, state, seq]) carry the session
+        // bit — see AABBDevice.trackKeepalive.
+        if (inner.length === 3 && inner[0] === 0x20) {
+            this.trackKeepalive(inner[1])
+            return
+        }
         if (inner.length < 11 || inner[0] !== 0x20) return
 
         // inner[3] is the FRAME-LENGTH byte (total frame size & 0xff), not a

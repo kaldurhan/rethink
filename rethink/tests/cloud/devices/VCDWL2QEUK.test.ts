@@ -804,6 +804,48 @@ describe(MODEL_ID, () => {
         assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
     })
 
+    // Real captured keepalives: e8 = asleep, e9 = session active.
+    const KEEPALIVE_ASLEEP = buf('aa0720e80a96bb')
+    const KEEPALIVE_SESSION = buf('aa0720e90a91bb')
+
+    test('10 consecutive asleep keepalives correct a stale AntiCrease to Standby + stage Off', () => {
+        const { ha, thinq } = makeDevice()
+        // Latch a post-cycle state, as left behind by a missed Standby frame.
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        thinq.emit('data', ANTI_CREASE_END)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'AntiCrease')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Done')
+        for (let i = 0; i < 10; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Off')
+    })
+
+    test('9 asleep keepalives are not enough (hysteresis); a session keepalive resets the streak', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        thinq.emit('data', ANTI_CREASE_END)
+        for (let i = 0; i < 9; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'AntiCrease')
+        // e9 blip resets — 9 more e8 still must not fire
+        thinq.emit('data', KEEPALIVE_SESSION)
+        for (let i = 0; i < 9; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'AntiCrease')
+        thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+    })
+
+    test('asleep keepalives on a fresh device publish Standby (corrects stale retained values after restart)', () => {
+        const { ha, thinq } = makeDevice()
+        for (let i = 0; i < 10; i++) thinq.emit('data', KEEPALIVE_ASLEEP)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, 'Standby')
+    })
+
+    test('session keepalives alone publish nothing', () => {
+        const { ha, thinq } = makeDevice()
+        for (let i = 0; i < 20; i++) thinq.emit('data', KEEPALIVE_SESSION)
+        assert.equal(ha.devices[DEVICE_ID].properties.run_state, undefined)
+    })
+
     test('active Running block infers door=closed (close-from-sleep emits no event)', () => {
         const { ha, thinq } = makeDevice()
         // Door left 'open' from a sleep-time test, then the user silently

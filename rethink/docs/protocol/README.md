@@ -47,6 +47,26 @@ Everything below refers to offsets **inside `inner`** (envelope stripped:
 Frames with other values (`0x31`, telemetry noise) appear occasionally and
 must be ignored.
 
+### Keepalive frames (7 bytes)
+
+Both machines emit `aa 07 <family> <state> <seq> <chk> bb` every ~2 s at all
+times. The state byte is a **session bit** [confirmed across all 2026-06-12
+captures, both machines]:
+
+| state  | meaning                                                          |
+| ------ | ---------------------------------------------------------------- |
+| `0xe9` | session active (panel awake, cycle running, paused, anti-crease) |
+| `0xe8` | asleep — returns ~90 s after the panel sleeps                    |
+| other  | one-off event values (`0x19`/`0xd8`/`0xc3`/`0x7f`) — ignore      |
+
+`0xe8` never appears during an active session (0 of ~3,300 keepalives in a
+100-min wash); one transient mid-session blip was observed, so require a
+streak (~20 s) before acting. **Use it**: a sustained `0xe8` streak is the
+only signal an asleep machine emits — it corrects post-cycle states
+(End/AntiCrease) left stale by a missed Standby frame or a retained MQTT
+value restored after a bridge restart. A `0xf0`-family keepalive variant
+appears while the bridge is restarting — excluded by the family check.
+
 ## 2. The four cross-cutting traps
 
 These bit us live within minutes of each deployment. Any implementation
