@@ -5,6 +5,7 @@ import { storePath } from '@/cloud/devices/stage_store'
 import DUT from '@/cloud/devices/VCDWL2QEUK'
 import type { Metadata } from '@/cloud/thinq'
 import { MockHAConnection, MockThinq2Device, buf, captureLog } from '@/tests/helpers/mocks'
+import { enableMockTimers, tickMockTimers } from '@/tests/helpers/timers'
 
 const DEVICE_ID = 'test-id'
 const MODEL_ID = 'VCDWL2QEUK'
@@ -1071,5 +1072,42 @@ describe(MODEL_ID, () => {
         thinq.emit('data', STANDBY_1) // ensure Off persisted for this id
         thinq.emit('data', END_OF_CYCLE) // stray End packet while Off
         assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Off')
+    })
+
+    // Regression (2026-06-13): a cloud reconnect re-emits 'newDevice' for the
+    // same id, so Bridge drops the old instance and builds a fresh one. The
+    // dropped instance had a pending Done→Off fallback (scheduleOff) that fired
+    // ~5 min later and published 'Off' to the SHARED stage topic, clobbering
+    // the live instance's 'Washing' mid-cycle. drop() must cancel that timer.
+    test('dropped instance does not later publish Off onto the live instance', (t) => {
+        enableMockTimers(t)
+        const ha = new MockHAConnection()
+
+        // First cycle ends on the stale instance → Done arms the 5-min fallback.
+        const staleThinq = new MockThinq2Device(DEVICE_ID, META)
+        const stale = new DUT(ha.asConnection(), staleThinq, META)
+        staleThinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing')
+        staleThinq.emit('data', END_OF_CYCLE)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Done')
+
+        // Reconnect: stale instance dropped, live instance takes over the id.
+        stale.drop()
+        const liveThinq = new MockThinq2Device(DEVICE_ID, META)
+        const live = new DUT(ha.asConnection(), liveThinq, META)
+        live.start()
+
+        // A back-to-back second cycle starts on the live instance.
+        liveThinq.emit('data', TURBOWASH_RUNNING_1MIN)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Washing', 'live instance entered Washing')
+
+        // Advance past the stale instance's Done→Off fallback delay.
+        tickMockTimers(t, 5 * 60 * 1000 + 1000)
+
+        assert.equal(
+            ha.devices[DEVICE_ID].properties.stage,
+            'Washing',
+            'orphaned timer from the dropped instance must not publish Off',
+        )
     })
 })

@@ -196,4 +196,18 @@ export default abstract class AABBDevice extends HADevice {
             this.offTimer = null
         }
     }
+
+    // Called when this instance is replaced (e.g. a cloud reconnect re-emits
+    // 'newDevice' for the same id — see Bridge.newDevice). Tear down our timers
+    // so an orphaned instance can no longer publish to the shared MQTT topic.
+    // Without this, a pending Done→Off fallback (scheduleOff) on the dropped
+    // instance fired ~5 min later and clobbered the LIVE instance's stage with
+    // 'Off' mid-cycle (washer stuck 'Off' through a back-to-back wash,
+    // 2026-06-13 10:37). silenceTimer is otherwise only cleared on the thinq
+    // 'close' event, which a drop()-by-replacement does not emit.
+    override drop() {
+        this.cancelOffTimer()
+        clearInterval(this.silenceTimer)
+        super.drop()
+    }
 }
