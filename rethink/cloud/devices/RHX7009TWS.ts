@@ -45,6 +45,15 @@ const COURSES: Record<number, string> = {
 
 // Phase tuple encoded as (phA << 8) | phB.
 // Note: actual captures show [07 01] for Drying (not [07 09] as in older docs).
+//
+// Labels for 0x0711 / 0x1100 / 0x0811 were first guessed from their position
+// in a 2026-06-06 capture without a cloud feed and were WRONG. A live cycle
+// 2026-10-11 compared against the cloud `state` timeline showed:
+//   (11,00) CONDENSER_CLEAN — heat-exchanger self-clean, mid-cycle AND at the
+//           end; compressor still draws ~10 Wh/min mid-cycle, ~1 at the end
+//   (07,11) DRYING          — ~16 min at the same ~9.9 Wh/min as (07,01)
+//   (08,11) COOLING         — ~1 Wh/min; the only genuine cool-down
+//   (04,00) END
 const PHASES: Record<number, string> = {
     0x0503: 'Idle',
     0x0309: 'Heating',
@@ -52,10 +61,10 @@ const PHASES: Record<number, string> = {
     0x0100: 'Startup', // brief init phase at cycle start (~8 s before heating begins)
     0x0701: 'Drying',
     0x0703: 'Drying', // transient variant seen immediately after resume
-    0x0710: 'Cooldown',
-    0x0711: 'Cooldown', // sustained cooldown-tumble (cool air, no heat) — dominant end-of-drying phase
-    0x1100: 'Finishing', // very brief transition at TR=2 just before drum stops
-    0x0811: 'Finishing', // final pre-anti-crease phase, TR=1, ~3 min
+    0x0711: 'Drying', // drying that resumes after the mid-cycle condenser clean
+    0x1100: 'Condenser clean',
+    0x0811: 'Cooling', // final pre-anti-crease phase, TR=1, ~1–3 min
+    0x0710: 'Cooldown', // UNVERIFIED — from the RH90V9_WW community table, never observed here
 }
 
 function decodePhase(phA: number, phB: number): string {
@@ -416,7 +425,7 @@ export default class Device extends AABBDevice {
             }
             if (phase === 'Heating') this.stageFsm!.dispatch('heatPhase')
             else if (phase === 'Drying') this.stageFsm!.dispatch('dryPhase')
-            else if (phase === 'Cooldown' || phase === 'Finishing') this.stageFsm!.dispatch('coolPhase')
+            else if (phase === 'Cooldown' || phase === 'Cooling') this.stageFsm!.dispatch('coolPhase')
         }
 
         // TR while running = minutes remaining. While ST=0xeb/selection it is

@@ -48,13 +48,13 @@ const STARTUP_TR70 = buf(
 )
 
 // Captured at 19:05:32 — first packet where phA=07 phB=11 (Cooldown phase begins at TR=10).
-// Cool-air tumble continues TR=10→3 (~17 min) before Finishing.
+// Phase (07,11) = real drying (cloud-verified 2026-10-11), continues TR=10→3 before Cooling.
 const COOLDOWN_PHASE = buf(
     'aaff300a007800acd3000100ec0066000503000006000000000b00461100000307670406000000000060810500000000000000000000000000006400040078000000000503000006000000000b004607110003076d040600000000004081050000000000000000000000000000640004007800000066cdbb',
 )
 
 // Captured at 19:22:52 (TR=2, phA=11 phB=00) then 19:22:53 (TR=1, phA=08 phB=11).
-// Both map to Finishing — brief end-of-cooldown states before anti-crease.
+// (11,00) = condenser clean, then (08,11) = Cooling, before anti-crease.
 const FINISHING_TR2 = buf(
     'aaff300a007800ad7c000100ec0066000503000006000000000300460711000407f60406000000000040810500000000000000000000000000006400040078000000000503000006000000000200461100000507ff0406000000000060810500000000000000000000000000006400040078000000d850bb',
 )
@@ -115,6 +115,16 @@ const DRYING_1514WH = buf(
 // Finishing (08,11) at 09:36:55 — sub1 reads 1850, sub2 1853 (cloud final: 1853).
 const FINISHING_1853WH = buf(
     'aaff300a0078007088000100ec00660005030000060000000001004608110005073a04060000000000608105000000000000000000000000000064000400780000000005030000060000000001004608110005073d0406000000000040810500000000000000000000000000006400040078000000ccdcbb',
+)
+// Condenser self-clean at 09:13:49 — phase (11,00), cloud state CONDENSER_CLEAN
+// with selfCleaning ON; TR jumps 11 -> 21 here, compressor still drawing ~10 Wh/min.
+const CONDENSER_CLEAN_TR21 = buf(
+    'aaff300a0078006fa3000100ec0066000503000006000000000b004607010003066c04060000000000408105000000000000000000000000000064000400780000000005030000060000000015004611000003067604060000000000608105000000000000000000000000000064000400780000000158bb',
+)
+// 09:17:04 — phase (07,11), cloud state DRYING (self-clean finished). Runs ~16 min
+// at the same ~9.9 Wh/min as (07,01): this is drying, not a cool-air tumble.
+const DRYING_AFTER_CLEAN_TR18 = buf(
+    'aaff300a0078006fc6000100ec006600050300000600000000120046110000030693040600000000006081050000000000000000000000000000640004007800000000050300000600000000120046071100030695040600000000004081050000000000000000000000000000640004007800000016d5bb',
 )
 // End packet at 09:37:41 that closed that cycle.
 const END_AFTER_1853WH = buf(
@@ -397,24 +407,42 @@ describe(MODEL_ID, () => {
         assert.equal(p.program, 'Mixed Fabrics')
     })
 
-    test('cooldown phase (0x0711) → run_state=Running, phase=Cooldown, remaining_time=11', () => {
+    test('phase 0x0711 is drying (cloud state DRYING), not cooldown', () => {
         const { ha, thinq } = makeDevice()
         thinq.emit('data', COOLDOWN_PHASE)
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.run_state, 'Running')
-        assert.equal(p.phase, 'Cooldown')
+        assert.equal(p.phase, 'Drying')
+        assert.equal(p.stage, 'Drying')
         assert.equal(p.remaining_time, 11)
         assert.equal(p.program, 'Mixed Fabrics')
     })
 
-    test('finishing phases (0x1100 TR=2 then 0x0811 TR=1) → phase=Finishing', () => {
+    test('phase 0x1100 is condenser clean and 0x0811 is the real Cooling', () => {
         const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_TR29)
         thinq.emit('data', FINISHING_TR2)
-        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Finishing')
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Condenser clean')
         assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 2)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying', 'condenser clean is not cooling')
         thinq.emit('data', FINISHING_TR1)
-        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Finishing')
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Cooling')
         assert.equal(ha.devices[DEVICE_ID].properties.remaining_time, 1)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Cooling')
+    })
+
+    test('mid-cycle condenser clean keeps stage Drying through the drying that follows (2026-10-11 cycle)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_1514WH)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', CONDENSER_CLEAN_TR21)
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Condenser clean')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', DRYING_AFTER_CLEAN_TR18)
+        assert.equal(ha.devices[DEVICE_ID].properties.phase, 'Drying')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Drying')
+        thinq.emit('data', FINISHING_1853WH)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Cooling')
     })
 
     test('info-class ST=0x03 cooldown chatter (len=96 shape, counter 0x07) publishes nothing', () => {

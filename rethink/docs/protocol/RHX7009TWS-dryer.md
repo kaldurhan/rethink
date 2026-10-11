@@ -156,9 +156,31 @@ from End packets — keep the programme that actually ran. [confirmed]
 | `(01,00)`                                  | Startup — broadcast during selection **and** the first ~8 s of a real cycle |
 | `(03,09)`, `(03,07)`                       | Heating (`(03,07)` is a transient right after resume)                       |
 | `(07,01)`, `(07,03)`                       | Drying (`(07,03)` transient after resume)                                   |
-| `(07,10)`, `(07,11)`                       | Cooldown (`(07,11)` is the dominant sustained cool-air tumble)              |
-| `(11,00)`, `(08,11)`                       | Finishing (brief states at TR=2 / TR=1 before drum stop)                    |
+| `(07,11)`                                  | Drying — resumes after the mid-cycle condenser clean (**not** cooldown)     |
+| `(11,00)`                                  | Condenser clean (self-clean), mid-cycle and at the end                      |
+| `(08,11)`                                  | Cooling — the only genuine cool-down, ~1–3 min before drum stop             |
+| `(07,10)`                                  | Cooldown — **unverified**, from the RH90V9_WW table, never observed         |
 | `(04,00)`, `(00,03)`, `(03,01)`, `(00,00)` | post-cycle / transition chatter — **unmapped on purpose**; see §6.2         |
+
+**Correction 2026-10-11.** Labels for `(07,11)`, `(11,00)` and `(08,11)` were
+first inferred from position in a 2026-06-06 capture that had no cloud feed
+("last ~17 min = cooldown") and were wrong. A live Mixed Fabrics cycle
+compared with the cloud `state` timeline [cloud-correlated]:
+
+| time (UTC) | cloud `state`   | tuple     | Wh/min |
+| ---------- | --------------- | --------- | ------ |
+| …–09:13    | DRYING          | `(07,01)` | 9.8    |
+| 09:13:50   | CONDENSER_CLEAN | `(11,00)` | 7.7    |
+| 09:17:04   | DRYING          | `(07,11)` | 9.9    |
+| 09:33:40   | CONDENSER_CLEAN | `(11,00)` | ~1     |
+| 09:34:35   | COOLING         | `(08,11)` | ~1     |
+| 09:37:19   | END             | `(04,00)` | 0      |
+
+The `0x12` event frames (§5, formerly "cooldown chime") fire at every
+self-clean start/stop (09:13:48, 09:17:00, 09:33:35, 09:36:50). The flags
+`inner[90]` (0x40→0x60) and `inner[88]` bit 0x20 track the cloud's
+`selfCleaning` (4/4 transitions) and `drumLight` (2/2). The mid-cycle clean
+coincides with the remaining-time jump 11→21.
 
 **Critical rule: unknown phase tuples must be treated as untrusted.** An
 `0xec` packet with an unmapped tuple may not claim running, may not drive a
@@ -265,17 +287,17 @@ standby     st=0b                   → Off
 
 ## 9. Suggested entity model
 
-| entity                                                     | source                                              |
-| ---------------------------------------------------------- | --------------------------------------------------- |
-| run state (Standby/Running/Paused/Cooldown/AntiCrease/End) | ST + §5/§6 rules                                    |
-| programme                                                  | CS (never from End packets)                         |
-| phase (Idle/Heating/Drying/Cooldown/Finishing/Finished)    | phase tuple; Finished on End/AntiCrease (§4.2)      |
-| remaining time (min)                                       | TR while running                                    |
-| programme duration (min → % progress)                      | TR at the cycle-start edge (§2.2)                   |
-| dryness level / drying mode                                | `inner[14]` / `inner[15]` in 120-byte frames (§2.2) |
-| door (open/closed)                                         | door event `[31]` + active-phase inference (§5)     |
-| cycle energy (Wh)                                          | `sub2+17..18` BE u16, active phases only (§10)      |
-| derived "stage" with exactly-once Done                     | explicit FSM, see `stage_fsm.ts`                    |
+| entity                                                       | source                                              |
+| ------------------------------------------------------------ | --------------------------------------------------- |
+| run state (Standby/Running/Paused/Cooldown/AntiCrease/End)   | ST + §5/§6 rules                                    |
+| programme                                                    | CS (never from End packets)                         |
+| phase (Idle/Heating/Drying/Condenser clean/Cooling/Finished) | phase tuple; Finished on End/AntiCrease (§4.2)      |
+| remaining time (min)                                         | TR while running                                    |
+| programme duration (min → % progress)                        | TR at the cycle-start edge (§2.2)                   |
+| dryness level / drying mode                                  | `inner[14]` / `inner[15]` in 120-byte frames (§2.2) |
+| door (open/closed)                                           | door event `[31]` + active-phase inference (§5)     |
+| cycle energy (Wh)                                            | `sub2+17..18` BE u16, active phases only (§10)      |
+| derived "stage" with exactly-once Done                       | explicit FSM, see `stage_fsm.ts`                    |
 
 ## 10. Packet-type census (full Mixed Fabrics cycle, 2026-06-06)
 
@@ -303,7 +325,7 @@ capture with the cloud feed verified-live found cumulative cycle energy in the
 when `sub2` = 64), equal to the cloud's `courseSpendPower` in 32 of 32
 samples (1232→1514 Wh mid-cycle, final 1853 Wh) and monotone. Cross-checked
 against all older dryer captures: 0 on selection/Startup frames, climbing
-through Drying/Cooldown to the same final value as the post-cycle `(04,00)` /
+through Drying/Cooling to the same final value as the post-cycle `(04,00)` /
 `(00,04)` chatter (~250 Wh on the 06-11/06-12 short cycles, 631 on the long
 06-12 cycle). The first sub-block carries the same field one tick behind
 (`sub1+17..18`). **[cloud-correlated]**

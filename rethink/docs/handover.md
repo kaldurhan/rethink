@@ -199,6 +199,15 @@ sessions — a door-open or panel touch forces the reconnect.
     event `[31]` (0x01=open, polarity confirmed mid-cycle) + active-phase
     closed-inference, washer parity (spec §5).
 
+14. ~~Dryer phase labels guessed from position~~ **CORRECTED 2026-10-11**
+    (pending release): cloud `state` timeline showed `(07,11)` is DRYING,
+    `(11,00)` is CONDENSER_CLEAN and only `(08,11)` is COOLING (dryer spec
+    §4.2). Stage no longer shows "Cooling" for ~20 min mid-drying. Phase
+    labels `Cooldown`/`Finishing` for those tuples are gone — now
+    `Drying` / `Condenser clean` / `Cooling`. `(07,10)` stays `Cooldown`,
+    unverified. Open: Stage FSM's `Cooling` has no `dryPhase` exit
+    (terminal by design).
+
 ### Cross-cutting
 
 14. **Washer FINISH doesn't close a still-open pause** if the cycle ends while
