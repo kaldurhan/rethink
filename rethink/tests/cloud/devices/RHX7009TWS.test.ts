@@ -105,6 +105,22 @@ const SCROLL_IRON_NORMAL = buf(
     'aaff300a007800bafd000100ec0066000302000005000000005a005a01000002000004050000002000008105000000000000000000000000000064000400780000000003030000050000000050005001000002000004050000002000008105000000000000000000000000000064000400780000001bc8bb',
 )
 
+// Real frames from the 2026-10-11 Mixed Fabrics cycle, captured side-by-side
+// with the LG cloud feed. Cumulative cycle energy (Wh, BE u16) sits at
+// sub2+17..18 and matched the cloud's courseSpendPower in 32 of 32 samples.
+// Drying at 08:59:51 — sub1 reads 1504, sub2 1514 (cloud: 1514 at that second).
+const DRYING_1514WH = buf(
+    'aaff300a0078006f07000100ec0066000503000006000000000e00460701000305e00406000000000040810500000000000000000000000000006400040078000000000503000006000000000d00460701000305ea0406000000000040810500000000000000000000000000006400040078000000e7aebb',
+)
+// Finishing (08,11) at 09:36:55 — sub1 reads 1850, sub2 1853 (cloud final: 1853).
+const FINISHING_1853WH = buf(
+    'aaff300a0078007088000100ec00660005030000060000000001004608110005073a04060000000000608105000000000000000000000000000064000400780000000005030000060000000001004608110005073d0406000000000040810500000000000000000000000000006400040078000000ccdcbb',
+)
+// End packet at 09:37:41 that closed that cycle.
+const END_AFTER_1853WH = buf(
+    'aaff300a00580070910001010400460303010105214009031e096b000a00f0db00000a00000605000004000401f1014e00000f111110000000101000f2000100000000010000000000b303f33635b324f44d0c030d01e9bb',
+)
+
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
@@ -577,5 +593,42 @@ describe(MODEL_ID, () => {
         assert.equal(second.ha.devices[DEVICE_ID].properties.stage, 'Drying')
         second.thinq.emit('data', FINISHED)
         assert.equal(second.ha.devices[DEVICE_ID].properties.stage, 'Done')
+    })
+
+    test('config exposes cycle and last-cycle energy as energy sensors', () => {
+        const { ha } = makeDevice()
+        const cfg = ha.devices[DEVICE_ID]?.config?.components as Record<string, Record<string, unknown>>
+        assert.equal(cfg.course_spend_power?.device_class, 'energy')
+        assert.equal(cfg.course_spend_power?.unit_of_measurement, 'Wh')
+        assert.equal(cfg.last_cycle_energy?.device_class, 'energy')
+    })
+
+    test('running frame publishes cumulative cycle energy from sub2 (cloud-correlated)', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_1514WH)
+        assert.equal(ha.devices[DEVICE_ID].properties.course_spend_power, 1514)
+    })
+
+    test('selection frame does not publish cycle energy', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', QUICK_DRY_30_SELECTED)
+        assert.equal(ha.devices[DEVICE_ID].properties.course_spend_power, undefined)
+    })
+
+    test('post-cycle tumble with an unknown phase tuple leaves cycle energy untouched', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_1514WH)
+        thinq.emit('data', ANTICREASE_TUMBLE_TR1)
+        assert.equal(ha.devices[DEVICE_ID].properties.course_spend_power, 1514)
+    })
+
+    test('Done publishes last_cycle_energy from the final running frame', () => {
+        const { ha, thinq } = makeDevice()
+        thinq.emit('data', DRYING_1514WH)
+        thinq.emit('data', FINISHING_1853WH)
+        assert.equal(ha.devices[DEVICE_ID].properties.course_spend_power, 1853)
+        thinq.emit('data', END_AFTER_1853WH)
+        assert.equal(ha.devices[DEVICE_ID].properties.stage, 'Done')
+        assert.equal(ha.devices[DEVICE_ID].properties.last_cycle_energy, 1853)
     })
 })

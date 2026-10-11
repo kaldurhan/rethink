@@ -173,9 +173,11 @@ sessions — a door-open or panel touch forces the reconnect.
 
 ### Dryer
 
-9. **No dryer energy sensor — analysis 2026-06-12 came back negative**: the
-   len-176 frames carry 2 Hz counters, not Wh (dryer spec §10); a conclusive
-   decode needs a dry cycle with a verified-live cloud feed for periodicEnergyData correlation.
+9. ~~No dryer energy sensor~~ **RESOLVED 2026-10-11** (pending release): the
+   energy lives in the 120-byte status frames at `sub2+17..18` (BE u16),
+   cloud-correlated 32/32 on a live cycle (dryer spec §10) — the 2026-06-12
+   negative result only looked at the len-176 frames. `course_spend_power`
+   ("Cycle energy") and `last_cycle_energy` entities added.
 10. ~~`0x07` pause code~~ **CLOSED 2026-06-12**: real door pause emits 0x0c
     (same as panel pause); 0x07 dropped. Dryer door sensor implemented (gap 13b).
 11. ~~dryness_level/drying_mode decode wrong bytes~~ **REWORKED 2026-06-12**

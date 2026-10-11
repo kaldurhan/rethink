@@ -274,6 +274,7 @@ standby     st=0b                   → Off
 | programme duration (min → % progress)                      | TR at the cycle-start edge (§2.2)                   |
 | dryness level / drying mode                                | `inner[14]` / `inner[15]` in 120-byte frames (§2.2) |
 | door (open/closed)                                         | door event `[31]` + active-phase inference (§5)     |
+| cycle energy (Wh)                                          | `sub2+17..18` BE u16, active phases only (§10)      |
 | derived "stage" with exactly-once Done                     | explicit FSM, see `stage_fsm.ts`                    |
 
 ## 10. Packet-type census (full Mixed Fabrics cycle, 2026-06-06)
@@ -295,6 +296,24 @@ classifies by `inner[8]`/length (§1), not by `inner[3]`:
 | `0xa4`     | 0x03         | 2     | info-class — pre-AntiCrease transition burst                          |
 | `0xb0`     | 0x02         | 79    | **periodic sensor/energy data** (~every 2.5 min), len 172 — undecoded |
 | `0x30`     | 0x4d         | 3     | course-list report — dropped                                          |
+
+**RESOLVED 2026-10-11 — the energy is not in `0xb0`.** A live Mixed Fabrics
+capture with the cloud feed verified-live found cumulative cycle energy in the
+**120-byte status frames**: BE u16 at `sub2+17..18` (absolute `inner[81..82]`
+when `sub2` = 64), equal to the cloud's `courseSpendPower` in 32 of 32
+samples (1232→1514 Wh mid-cycle, final 1853 Wh) and monotone. Cross-checked
+against all older dryer captures: 0 on selection/Startup frames, climbing
+through Drying/Cooldown to the same final value as the post-cycle `(04,00)` /
+`(00,04)` chatter (~250 Wh on the 06-11/06-12 short cycles, 631 on the long
+06-12 cycle). The first sub-block carries the same field one tick behind
+(`sub1+17..18`). **[cloud-correlated]**
+
+The dryer also emits the washer's **11-byte periodic-energy frame**
+`aa 0b 30 3e <per BE> <acc BE> <seq>` (every ~15 min; verified 148 Wh /
+1420 Wh / seq 9 against the cloud's `periodicEnergyData`) — not decoded here,
+redundant with the field above.
+
+The earlier "decode `0xb0`" plan below is kept for history.
 
 **`0xb0` is the energy decode target.** 79 packets per cycle, len 172 —
 probably the same packets as the `0x75` info-class shape (len 172) in §5

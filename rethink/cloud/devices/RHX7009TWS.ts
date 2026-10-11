@@ -144,6 +144,16 @@ export default class Device extends AABBDevice {
                     unit_of_measurement: 'min',
                     icon: 'mdi:timer-sand',
                 },
+                course_spend_power: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-course-spend-power',
+                    state_topic: '$this/course_spend_power',
+                    name: 'Cycle energy',
+                    icon: 'mdi:lightning-bolt',
+                    unit_of_measurement: 'Wh',
+                    state_class: 'measurement',
+                    device_class: 'energy',
+                },
                 stage: {
                     platform: 'sensor',
                     unique_id: '$deviceid-stage',
@@ -178,6 +188,15 @@ export default class Device extends AABBDevice {
                     name: 'Last cycle duration',
                     icon: 'mdi:history',
                     unit_of_measurement: 'min',
+                },
+                last_cycle_energy: {
+                    platform: 'sensor',
+                    unique_id: '$deviceid-last-cycle-energy',
+                    state_topic: '$this/last_cycle_energy',
+                    name: 'Last cycle energy',
+                    icon: 'mdi:lightning-bolt-outline',
+                    unit_of_measurement: 'Wh',
+                    device_class: 'energy',
                 },
                 last_unknown: {
                     platform: 'sensor',
@@ -387,6 +406,13 @@ export default class Device extends AABBDevice {
                 // A positively identified active phase implies a closed door
                 // (washer parity: closing a sleeping machine's door is silent).
                 this.publishProperty('door', 'closed')
+                // Cumulative cycle energy (Wh): BE u16 at sub2+17, matched the
+                // cloud's courseSpendPower 32/32 in the 2026-10-11 capture
+                // and reads 0 on selection frames. Only positively identified
+                // active phases publish — post-cycle chatter keeps the last value.
+                if (hasSub2 && sub2Start + 18 < inner.length) {
+                    this.publishProperty('course_spend_power', (inner[sub2Start + 17] << 8) | inner[sub2Start + 18])
+                }
             }
             if (phase === 'Heating') this.stageFsm!.dispatch('heatPhase')
             else if (phase === 'Drying') this.stageFsm!.dispatch('dryPhase')
